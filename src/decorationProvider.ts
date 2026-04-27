@@ -11,18 +11,26 @@ const SEVERITY_COLORS: Record<Severity, { border: string; overview: string }> = 
 };
 
 export class DecorationProvider implements vscode.Disposable {
-  private decorationTypes = new Map<Severity, vscode.TextEditorDecorationType>();
+  // Full range (begin → end): coloured border + subtle background tint
+  private rangeDecTypes = new Map<Severity, vscode.TextEditorDecorationType>();
+  // Begin line only: inline after-text annotation
+  private annotDecTypes = new Map<Severity, vscode.TextEditorDecorationType>();
   private disposables: vscode.Disposable[] = [];
 
   constructor(private issueManager: IssueManager) {
     for (const [severity, colors] of Object.entries(SEVERITY_COLORS) as [Severity, typeof SEVERITY_COLORS[Severity]][]) {
-      this.decorationTypes.set(severity, vscode.window.createTextEditorDecorationType({
+      this.rangeDecTypes.set(severity, vscode.window.createTextEditorDecorationType({
         borderWidth: '0 0 0 3px',
         borderStyle: 'solid',
         borderColor: colors.border,
+        backgroundColor: colors.border + '18', // ~10% opacity tint over the full range
         overviewRulerColor: colors.overview,
         overviewRulerLane: vscode.OverviewRulerLane.Left,
+        isWholeLine: true,
       }));
+
+      // Empty base type — per-decoration renderOptions supply the after-text
+      this.annotDecTypes.set(severity, vscode.window.createTextEditorDecorationType({}));
     }
 
     this.disposables.push(
@@ -46,21 +54,38 @@ export class DecorationProvider implements vscode.Disposable {
     const docPath = vscode.workspace.asRelativePath(editor.document.uri, false);
     const issues = this.issueManager.getIssuesForRelativePath(docPath);
 
-    const byS = new Map<Severity, vscode.DecorationOptions[]>();
-    for (const sev of Object.keys(SEVERITY_COLORS) as Severity[]) byS.set(sev, []);
+    type Opts = { range: vscode.DecorationOptions[]; annot: vscode.DecorationOptions[] };
+    const byS = new Map<Severity, Opts>();
+    for (const sev of Object.keys(SEVERITY_COLORS) as Severity[]) byS.set(sev, { range: [], annot: [] });
 
     for (const issue of issues) {
-      const beginLine = getBeginLine(issue) - 1; // convert to 0-indexed
+      const beginLine = toLine(issue.location.lines?.begin ?? issue.location.positions?.begin?.line) - 1;
       if (beginLine < 0) continue;
-      const endLine = getEndLine(issue) - 1;
-      const sev: Severity = issue.severity ?? 'info';
-      const range = new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER);
+      const endLine = toLine(
+        issue.location.lines?.end ??
+        issue.location.positions?.end?.line ??
+        issue.location.lines?.begin ??
+        issue.location.positions?.begin?.line,
+      ) - 1;
 
-      byS.get(sev)?.push({
-        range,
+      const sev: Severity = issue.severity ?? 'info';
+      const fullRange  = new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER);
+      const firstLine  = new vscode.Range(beginLine, 0, beginLine, Number.MAX_SAFE_INTEGER);
+
+      const entry = byS.get(sev);
+      if (!entry) continue;
+
+      entry.range.push({
+        range: fullRange,
         hoverMessage: new vscode.MarkdownString(
-          `**[${sev.toUpperCase()}]** \`${issue.check_name}\`\n\n${issue.description}\n\n*Source: ${issue.sourceFile}*`,
+          `**[${sev.toUpperCase()}]** \`${issue.check_name}\`  \n` +
+          `${issue.description}  \n\n` +
+          `*Lines ${beginLine + 1}–${endLine + 1} · ${issue.sourceFile}*`,
         ),
+      });
+
+      entry.annot.push({
+        range: firstLine,
         renderOptions: {
           after: {
             contentText: `  ● ${issue.check_name}`,
@@ -72,34 +97,27 @@ export class DecorationProvider implements vscode.Disposable {
       });
     }
 
-    for (const [sev, decType] of this.decorationTypes.entries()) {
-      editor.setDecorations(decType, byS.get(sev) ?? []);
+    for (const [sev, opts] of byS.entries()) {
+      editor.setDecorations(this.rangeDecTypes.get(sev)!, opts.range);
+      editor.setDecorations(this.annotDecTypes.get(sev)!, opts.annot);
     }
   }
 
   clearDecorations(): void {
+    const allTypes = [...this.rangeDecTypes.values(), ...this.annotDecTypes.values()];
     for (const editor of vscode.window.visibleTextEditors) {
-      for (const decType of this.decorationTypes.values()) {
-        editor.setDecorations(decType, []);
-      }
+      for (const dt of allTypes) editor.setDecorations(dt, []);
     }
   }
 
   dispose(): void {
-    for (const dt of this.decorationTypes.values()) dt.dispose();
+    for (const dt of [...this.rangeDecTypes.values(), ...this.annotDecTypes.values()]) dt.dispose();
     for (const d of this.disposables) d.dispose();
   }
 }
 
-function getBeginLine(issue: IssueWithSource): number {
-  if (issue.location.lines?.begin) return issue.location.lines.begin;
-  if (issue.location.positions?.begin?.line) return issue.location.positions.begin.line;
-  return 1;
-}
-
-function getEndLine(issue: IssueWithSource): number {
-  if (issue.location.lines?.end) return issue.location.lines.end;
-  if (issue.location.lines?.begin) return issue.location.lines.begin;
-  if (issue.location.positions?.end?.line) return issue.location.positions.end.line;
-  return 1;
+// Safely converts a raw value (number or string) to a 1-based line number.
+function toLine(val: number | string | undefined): number {
+  const n = Number(val);
+  return n > 0 ? Math.floor(n) : 1;
 }

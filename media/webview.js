@@ -292,7 +292,7 @@ function renderTable() {
     tr.innerHTML = [
       `<td><span class="severity-badge sev-${issue.severity ?? 'info'}">${esc(issue.severity ?? 'info')}</span></td>`,
       `<td class="cell-mono cell-truncate" title="${esc(issue.sourceFile)}">${esc(issue.sourceFile)}</td>`,
-      `<td class="cell-mono cell-truncate" title="${esc(issue.location?.path)}">${esc(issue.location?.path ?? '')}</td>`,
+      `<td class="cell-path" title="${esc(issue.location?.path)}">${esc(issue.location?.path ?? '')}</td>`,
       `<td class="cell-num">${line}</td>`,
       `<td class="cell-truncate" title="${esc(issue.check_name)}">${esc(issue.check_name)}</td>`,
       `<td class="cell-desc" title="${esc(issue.description)}">${esc(issue.description)}</td>`,

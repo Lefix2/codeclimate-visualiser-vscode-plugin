@@ -224,6 +224,18 @@ h3 {
   font-size: 0.9em;
 }
 
+/* Path column: truncate from the LEFT so the filename/end is always visible */
+.cell-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+  direction: rtl;       /* makes overflow happen on the left side */
+  text-align: left;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+}
+
 .cell-desc {
   max-width: 280px;
   overflow: hidden;
