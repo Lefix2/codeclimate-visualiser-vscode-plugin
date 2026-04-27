@@ -59,14 +59,11 @@ export class DecorationProvider implements vscode.Disposable {
     for (const sev of Object.keys(SEVERITY_COLORS) as Severity[]) byS.set(sev, { range: [], annot: [] });
 
     for (const issue of issues) {
-      const beginLine = toLine(issue.location.lines?.begin ?? issue.location.positions?.begin?.line) - 1;
+      const rawBegin = issue.location.lines?.begin ?? issue.location.positions?.begin;
+      const rawEnd   = issue.location.lines?.end   ?? issue.location.positions?.end;
+      const beginLine = toLine(rawBegin as Parameters<typeof toLine>[0]) - 1;
       if (beginLine < 0) continue;
-      const endLine = toLine(
-        issue.location.lines?.end ??
-        issue.location.positions?.end?.line ??
-        issue.location.lines?.begin ??
-        issue.location.positions?.begin?.line,
-      ) - 1;
+      const endLine = toLine((rawEnd ?? rawBegin) as Parameters<typeof toLine>[0]) - 1;
 
       const sev: Severity = issue.severity ?? 'info';
       const fullRange  = new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER);
@@ -116,8 +113,12 @@ export class DecorationProvider implements vscode.Disposable {
   }
 }
 
-// Safely converts a raw value (number or string) to a 1-based line number.
-function toLine(val: number | string | undefined): number {
+// Resolves a LineRef (plain int or {line, column} object) to a 1-based line number.
+function toLine(val: number | { line: number; column?: number } | string | undefined): number {
+  if (typeof val === 'object' && val !== null && 'line' in val) {
+    const n = Number(val.line);
+    return n > 0 ? Math.floor(n) : 1;
+  }
   const n = Number(val);
   return n > 0 ? Math.floor(n) : 1;
 }

@@ -332,9 +332,21 @@ document.querySelectorAll('#issues-table th[data-col]').forEach((th) => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getBeginLine(issue) {
-  if (issue.location?.lines?.begin)            return issue.location.lines.begin;
-  if (issue.location?.positions?.begin?.line)  return issue.location.positions.begin.line;
-  return 1;
+  return resolveLineRef(issue.location?.lines?.begin ?? issue.location?.positions?.begin);
+}
+
+/**
+ * Resolves a LineRef to a 1-based integer.
+ * Handles: plain number, {line, column} object (non-standard), or undefined.
+ */
+function resolveLineRef(ref) {
+  if (ref === undefined || ref === null) return 1;
+  if (typeof ref === 'object' && 'line' in ref) {
+    const n = Number(ref.line);
+    return n > 0 ? n : 1;
+  }
+  const n = Number(ref);
+  return n > 0 ? n : 1;
 }
 
 function esc(str) {

@@ -1,8 +1,12 @@
 export type Severity = 'info' | 'minor' | 'major' | 'critical' | 'blocker';
 
+// Standard spec: begin/end are plain integers.
+// Some tools use {line, column} objects instead — we support both.
+export type LineRef = number | { line: number; column?: number };
+
 export interface CodeClimateLines {
-  begin: number;
-  end?: number;
+  begin: LineRef;
+  end?: LineRef;
 }
 
 export interface CodeClimatePosition {

@@ -53,7 +53,15 @@ export class IssueManager {
   }
 
   getIssuesForRelativePath(relPath: string): IssueWithSource[] {
-    return this.getAllIssues().filter((i) => i.location.path === relPath);
+    const rel = relPath.replace(/\\/g, '/');
+    return this.getAllIssues().filter((i) => {
+      const p = (i.location.path ?? '').replace(/\\/g, '/');
+      // exact match (relative paths from standard CodeClimate)
+      if (p === rel) return true;
+      // absolute path: check if it ends with /relPath
+      if (p.endsWith('/' + rel)) return true;
+      return false;
+    });
   }
 
   get isEmpty(): boolean {

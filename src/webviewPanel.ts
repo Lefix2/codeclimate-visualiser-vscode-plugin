@@ -63,29 +63,38 @@ export class CodeClimatePanel implements vscode.Disposable {
   }
 
   private async openFileAtLine(filePath: string, line: number): Promise<void> {
-    const folders = vscode.workspace.workspaceFolders ?? [];
-    for (const folder of folders) {
-      const fullPath = path.join(folder.uri.fsPath, filePath);
-      if (fs.existsSync(fullPath)) {
-        const doc = await vscode.workspace.openTextDocument(fullPath);
-        const editor = await vscode.window.showTextDocument(doc, {
-          preserveFocus: false,
-          preview: false,
-          viewColumn: vscode.ViewColumn.Beside,
-        });
-        const pos = new vscode.Position(Math.max(0, line - 1), 0);
-        editor.selection = new vscode.Selection(pos, pos);
-        editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
-        return;
-      }
+    const candidates: string[] = [];
+
+    // Absolute path first (common when CodeClimate runs on the full FS)
+    if (path.isAbsolute(filePath)) {
+      candidates.push(filePath);
     }
-    // fallback: try as absolute path
-    if (fs.existsSync(filePath)) {
-      const doc = await vscode.workspace.openTextDocument(filePath);
-      await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside });
+
+    // Try joining with each workspace folder (handles relative paths)
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      candidates.push(path.join(folder.uri.fsPath, filePath));
+    }
+
+    // Also try the raw path as-is (relative to CWD)
+    if (!path.isAbsolute(filePath)) {
+      candidates.push(filePath);
+    }
+
+    for (const candidate of candidates) {
+      if (!fs.existsSync(candidate)) continue;
+      const doc = await vscode.workspace.openTextDocument(candidate);
+      const editor = await vscode.window.showTextDocument(doc, {
+        preserveFocus: false,
+        preview: false,
+        viewColumn: vscode.ViewColumn.Beside,
+      });
+      const pos = new vscode.Position(Math.max(0, line - 1), 0);
+      editor.selection = new vscode.Selection(pos, pos);
+      editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
       return;
     }
-    vscode.window.showWarningMessage(`File not found in workspace: ${filePath}`);
+
+    vscode.window.showWarningMessage(`File not found: ${filePath}`);
   }
 
   private buildHtml(): string {
