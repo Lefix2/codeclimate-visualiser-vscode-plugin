@@ -145,7 +145,7 @@ export class CodeClimatePanel implements vscode.Disposable {
       <div id="filters">
         <div id="filter-severity"></div>
         <div id="filter-sourcefile"></div>
-        <input type="text" id="filter-search" placeholder="Search description, path…">
+        <input type="text" id="filter-search" placeholder="Filter… (separate terms with ;)">
       </div>
       <div id="active-filters"></div>
 
@@ -154,12 +154,12 @@ export class CodeClimatePanel implements vscode.Disposable {
           <thead>
             <tr>
               <th data-col="severity">Severity</th>
-              <th data-col="sourceFile">Source File</th>
-              <th data-col="path">Path</th>
-              <th data-col="line">Line</th>
+              <th data-col="categories">Category</th>
               <th data-col="check_name">Check Name</th>
+              <th data-col="sourceFile">Source</th>
+              <th data-col="file">File</th>
+              <th data-col="line">Line</th>
               <th data-col="description">Description</th>
-              <th data-col="categories">Categories</th>
             </tr>
           </thead>
           <tbody id="issues-tbody"></tbody>

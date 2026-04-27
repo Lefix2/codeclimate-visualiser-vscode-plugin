@@ -247,7 +247,7 @@ h3 {
 
 /* Cells whose value can be clicked to apply a quick filter */
 .cell-clickable {
-  cursor: crosshair;
+  cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 2px;
 }
@@ -259,29 +259,14 @@ h3 {
   color: var(--vscode-textLink-activeForeground, #4fc3f7);
 }
 
-/* Path column: flex layout — dir shrinks+truncates left, filename stays bold */
-.cell-path {
-  max-width: 300px;
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-  white-space: nowrap;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 0.9em;
+.cat-clickable {
+  cursor: pointer;
 }
-.path-dir {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  direction: rtl;       /* overflow ellipsis appears on the left */
-  text-align: left;
-  opacity: 0.7;
+.cat-clickable:hover {
+  opacity: 0.8;
+  outline: 1px solid currentColor;
 }
-.path-file {
-  flex: 0 0 auto;
-  font-weight: 700;
-}
+
 
 .cell-desc {
   max-width: 280px;
@@ -336,6 +321,74 @@ h3 {
 .row-sev-major    td:first-child { border-left: 3px solid #f4511e; }
 .row-sev-minor    td:first-child { border-left: 3px solid #f9a825; }
 .row-sev-info     td:first-child { border-left: 3px solid #78909c; }
+
+/* ── Expanded row ────────────────────────────────────────────────────────────── */
+
+.row-expanded {
+  background: var(--vscode-list-activeSelectionBackground, #094771) !important;
+}
+.row-expanded td:first-child {
+  border-left-width: 4px !important;
+}
+
+.detail-row td {
+  padding: 0;
+  border-bottom: 2px solid var(--vscode-editorWidget-border, #454545);
+}
+
+.detail-content {
+  padding: 10px 14px 12px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  align-items: flex-start;
+  background: var(--vscode-editorWidget-background, #252526);
+}
+
+.detail-field {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  flex: 1 1 300px;
+}
+
+.detail-label {
+  font-weight: 600;
+  font-size: 0.8em;
+  opacity: 0.65;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.detail-value {
+  font-size: 0.86em;
+  word-break: break-all;
+}
+
+.detail-mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.82em;
+  opacity: 0.85;
+}
+
+.open-file-btn {
+  margin-top: 4px;
+  padding: 3px 10px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.82em;
+  font-family: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+.open-file-btn:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
 
 /* ── Table footer ────────────────────────────────────────────────────────────── */
 
