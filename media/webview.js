@@ -5,11 +5,11 @@ const vscode = acquireVsCodeApi();
 
 const SEVERITY_ORDER = ['blocker', 'critical', 'major', 'minor', 'info'];
 const SEVERITY_COLORS = {
-  blocker:  '#ff3b30',
-  critical: '#ff6b35',
-  major:    '#ff9f0a',
-  minor:    '#ffd60a',
-  info:     '#0a84ff',
+  blocker:  '#7b1fa2',
+  critical: '#e53935',
+  major:    '#f4511e',
+  minor:    '#f9a825',
+  info:     '#78909c',
 };
 const PALETTE = [
   '#ff6384','#36a2eb','#ffce56','#4bc0c0','#9966ff',
@@ -21,12 +21,22 @@ const PALETTE = [
 let allIssues = [];
 /** @type {any[]} */
 let allFiles = [];
-/** @type {{ severities: Set<string>, sourceFiles: Set<string>, search: string }} */
+
+/**
+ * @type {{
+ *   severities: Set<string>,
+ *   sourceFiles: Set<string>,
+ *   search: string,
+ *   checkName: string
+ * }}
+ */
 let filters = {
   severities: new Set(SEVERITY_ORDER),
   sourceFiles: new Set(),
   search: '',
+  checkName: '',
 };
+
 /** @type {{ col: string, dir: 'asc'|'desc' }} */
 let sortState = { col: 'severity', dir: 'asc' };
 /** @type {Record<string, any>} */
@@ -39,7 +49,6 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'updateIssues') {
     allIssues = msg.issues ?? [];
     allFiles  = msg.files  ?? [];
-    // reset source-file filter to show all loaded files
     filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
     render();
   }
@@ -50,12 +59,12 @@ window.addEventListener('message', (event) => {
 function getFiltered() {
   const q = filters.search.toLowerCase();
   return allIssues.filter((issue) => {
-    if (!filters.severities.has(issue.severity ?? 'info')) return false;
-    if (!filters.sourceFiles.has(issue.sourceUri))         return false;
+    if (!filters.severities.has(issue.severity ?? 'info'))  return false;
+    if (!filters.sourceFiles.has(issue.sourceUri))           return false;
+    if (filters.checkName && issue.check_name !== filters.checkName) return false;
     if (q) {
       return (
-        (issue.description  ?? '').toLowerCase().includes(q) ||
-        (issue.check_name   ?? '').toLowerCase().includes(q) ||
+        (issue.description    ?? '').toLowerCase().includes(q) ||
         (issue.location?.path ?? '').toLowerCase().includes(q)
       );
     }
@@ -68,18 +77,12 @@ function getSorted(issues) {
   return [...issues].sort((a, b) => {
     let va, vb;
     switch (col) {
-      case 'severity':
-        va = SEVERITY_ORDER.indexOf(a.severity ?? 'info');
-        vb = SEVERITY_ORDER.indexOf(b.severity ?? 'info');
-        break;
-      case 'line':
-        va = getBeginLine(a);
-        vb = getBeginLine(b);
-        break;
-      case 'path':        va = a.location?.path   ?? ''; vb = b.location?.path   ?? ''; break;
-      case 'sourceFile':  va = a.sourceFile        ?? ''; vb = b.sourceFile        ?? ''; break;
-      case 'check_name':  va = a.check_name        ?? ''; vb = b.check_name        ?? ''; break;
-      case 'description': va = a.description       ?? ''; vb = b.description       ?? ''; break;
+      case 'severity':    va = SEVERITY_ORDER.indexOf(a.severity ?? 'info'); vb = SEVERITY_ORDER.indexOf(b.severity ?? 'info'); break;
+      case 'line':        va = getBeginLine(a); vb = getBeginLine(b); break;
+      case 'path':        va = a.location?.path  ?? ''; vb = b.location?.path  ?? ''; break;
+      case 'sourceFile':  va = a.sourceFile       ?? ''; vb = b.sourceFile       ?? ''; break;
+      case 'check_name':  va = a.check_name       ?? ''; vb = b.check_name       ?? ''; break;
+      case 'description': va = a.description      ?? ''; vb = b.description      ?? ''; break;
       case 'categories':  va = (a.categories ?? []).join(); vb = (b.categories ?? []).join(); break;
       default: return 0;
     }
@@ -93,18 +96,19 @@ function getSorted(issues) {
 
 function render() {
   const hasData = allIssues.length > 0;
-  el('empty-state').style.display   = hasData ? 'none' : '';
-  el('main-content').style.display  = hasData ? ''     : 'none';
+  el('empty-state').style.display  = hasData ? 'none' : '';
+  el('main-content').style.display = hasData ? ''     : 'none';
   if (!hasData) return;
 
   renderFileChips();
   renderSeverityFilter();
   renderSourceFileFilter();
+  renderActiveFilters();
   renderCharts();
   renderTable();
 }
 
-// ── File chips ────────────────────────────────────────────────────────────────
+// ── File chips (loaded JSON files) ────────────────────────────────────────────
 
 function renderFileChips() {
   const container = el('file-chips');
@@ -126,7 +130,7 @@ function renderFileChips() {
   }
 }
 
-// ── Filters ───────────────────────────────────────────────────────────────────
+// ── Filter controls ───────────────────────────────────────────────────────────
 
 function renderSeverityFilter() {
   const container = el('filter-severity');
@@ -174,33 +178,79 @@ function renderSourceFileFilter() {
     });
 
     label.appendChild(cb);
-    label.appendChild(document.createTextNode(' ' + file.filename));
+    label.appendChild(document.createTextNode(' ' + file.filename));
     container.appendChild(label);
   }
 }
 
-// Wire search input once (it exists in the static HTML)
+function renderActiveFilters() {
+  const container = el('active-filters');
+  container.innerHTML = '';
+  if (!filters.checkName) return;
+
+  const chip = document.createElement('span');
+  chip.className = 'active-filter-chip';
+
+  const label = document.createElement('span');
+  label.textContent = `Check: ${filters.checkName}`;
+  chip.appendChild(label);
+
+  const btn = document.createElement('button');
+  btn.className = 'chip-remove';
+  btn.title = 'Clear filter';
+  btn.textContent = '×';
+  btn.addEventListener('click', () => {
+    filters.checkName = '';
+    renderActiveFilters();
+    renderCharts();
+    renderTable();
+  });
+  chip.appendChild(btn);
+  container.appendChild(chip);
+}
+
+// Wire search input (static HTML element)
 document.getElementById('filter-search')?.addEventListener('input', (e) => {
   filters.search = /** @type {HTMLInputElement} */(e.target).value;
   renderCharts();
   renderTable();
 });
 
+// ── Quick-filter helpers (called from table cell clicks) ──────────────────────
+
+function filterByCheckName(name) {
+  if (filters.checkName === name) {
+    filters.checkName = '';  // toggle off
+  } else {
+    filters.checkName = name;
+  }
+  renderActiveFilters();
+  renderCharts();
+  renderTable();
+}
+
+function filterBySourceFile(uri) {
+  const isOnlyThis = filters.sourceFiles.size === 1 && filters.sourceFiles.has(uri);
+  if (isOnlyThis) {
+    // reset to all
+    filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
+  } else {
+    filters.sourceFiles = new Set([uri]);
+  }
+  renderSourceFileFilter();  // sync checkboxes
+  renderCharts();
+  renderTable();
+}
+
 // ── Charts ────────────────────────────────────────────────────────────────────
 
 function renderCharts() {
   const filtered = getFiltered();
-  renderPieChart('chart-severity',  countBy(filtered, (i) => [i.severity ?? 'info'],          SEVERITY_ORDER, SEVERITY_COLORS));
+  renderPieChart('chart-severity',  countBy(filtered, (i) => [i.severity ?? 'info'],                              SEVERITY_ORDER, SEVERITY_COLORS));
   renderPieChart('chart-category',  countBy(filtered, (i) => i.categories?.length ? i.categories : ['Uncategorized']));
   renderPieChart('chart-checkname', topN(countBy(filtered, (i) => [i.check_name ?? '—']), 10));
 }
 
-/**
- * @param {any[]} issues
- * @param {(i: any) => string[]} keyFn
- * @param {string[]} [order]
- * @param {Record<string,string>} [colorMap]
- */
 function countBy(issues, keyFn, order, colorMap = {}) {
   /** @type {Record<string,number>} */
   const counts = {};
@@ -208,12 +258,10 @@ function countBy(issues, keyFn, order, colorMap = {}) {
   for (const issue of issues) {
     for (const k of keyFn(issue)) counts[k] = (counts[k] ?? 0) + 1;
   }
-  // remove zero-count ordered keys
   if (order) for (const k of order) { if (counts[k] === 0) delete counts[k]; }
   return { counts, colorMap };
 }
 
-/** @param {{ counts: Record<string,number>, colorMap: Record<string,string> }} data */
 function topN(data, n) {
   const top = Object.fromEntries(
     Object.entries(data.counts).sort((a, b) => b[1] - a[1]).slice(0, n)
@@ -221,10 +269,6 @@ function topN(data, n) {
   return { counts: top, colorMap: data.colorMap };
 }
 
-/**
- * @param {string} canvasId
- * @param {{ counts: Record<string,number>, colorMap: Record<string,string> }} data
- */
 function renderPieChart(canvasId, { counts, colorMap }) {
   const canvas = /** @type {HTMLCanvasElement|null} */(document.getElementById(canvasId));
   if (!canvas) return;
@@ -254,15 +298,7 @@ function renderPieChart(canvasId, { counts, colorMap }) {
       responsive: true,
       maintainAspectRatio: true,
       plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            color: fgColor,
-            padding: 8,
-            font: { size: 11 },
-            boxWidth: 12,
-          },
-        },
+        legend: { position: 'bottom', labels: { color: fgColor, padding: 8, font: { size: 11 }, boxWidth: 12 } },
         tooltip: {
           callbacks: {
             label: (ctx) => ` ${ctx.label}: ${ctx.raw} (${Math.round(/** @type {number} */(ctx.raw) / total * 100)}%)`,
@@ -286,19 +322,64 @@ function renderTable() {
 
   for (const issue of filtered) {
     const line = getBeginLine(issue);
-    const tr = document.createElement('tr');
-    tr.className = `row-sev-${issue.severity ?? 'info'}`;
-    tr.title = 'Click to open file at line ' + line;
-    tr.innerHTML = [
-      `<td><span class="severity-badge sev-${issue.severity ?? 'info'}">${esc(issue.severity ?? 'info')}</span></td>`,
-      `<td class="cell-mono cell-truncate" title="${esc(issue.sourceFile)}">${esc(issue.sourceFile)}</td>`,
-      `<td class="cell-path" title="${esc(issue.location?.path)}">${esc(issue.location?.path ?? '')}</td>`,
-      `<td class="cell-num">${line}</td>`,
-      `<td class="cell-truncate" title="${esc(issue.check_name)}">${esc(issue.check_name)}</td>`,
-      `<td class="cell-desc" title="${esc(issue.description)}">${esc(issue.description)}</td>`,
-      `<td>${(issue.categories ?? []).map((c) => `<span class="cat-badge">${esc(c)}</span>`).join('')}</td>`,
-    ].join('');
+    const sev  = issue.severity ?? 'info';
+    const tr   = document.createElement('tr');
+    tr.className = `row-sev-${sev}`;
 
+    // Severity
+    const tdSev = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = `severity-badge sev-${sev}`;
+    badge.textContent = sev;
+    tdSev.appendChild(badge);
+    tr.appendChild(tdSev);
+
+    // Source file — click filters to that file
+    const tdSrc = document.createElement('td');
+    tdSrc.className = 'cell-mono cell-truncate cell-clickable';
+    tdSrc.title = `${issue.sourceFile} — click to filter`;
+    tdSrc.textContent = issue.sourceFile;
+    tdSrc.addEventListener('click', (e) => {
+      e.stopPropagation();
+      filterBySourceFile(issue.sourceUri);
+    });
+    tr.appendChild(tdSrc);
+
+    // Path — dir truncated left, filename bold
+    tr.appendChild(makePathCell(issue.location?.path ?? ''));
+
+    // Line
+    const tdLine = document.createElement('td');
+    tdLine.className = 'cell-num';
+    tdLine.textContent = String(line);
+    tr.appendChild(tdLine);
+
+    // Check name — click filters to that check name
+    const tdCheck = document.createElement('td');
+    tdCheck.className = 'cell-truncate cell-clickable';
+    tdCheck.title = `${issue.check_name} — click to filter`;
+    tdCheck.textContent = issue.check_name;
+    if (filters.checkName === issue.check_name) tdCheck.classList.add('cell-active-filter');
+    tdCheck.addEventListener('click', (e) => {
+      e.stopPropagation();
+      filterByCheckName(issue.check_name);
+    });
+    tr.appendChild(tdCheck);
+
+    // Description
+    const tdDesc = document.createElement('td');
+    tdDesc.className = 'cell-desc';
+    tdDesc.title = issue.description;
+    tdDesc.textContent = issue.description;
+    tr.appendChild(tdDesc);
+
+    // Categories
+    const tdCat = document.createElement('td');
+    tdCat.innerHTML = (issue.categories ?? [])
+      .map((c) => `<span class="cat-badge">${esc(c)}</span>`).join('');
+    tr.appendChild(tdCat);
+
+    // Row click → open file
     tr.addEventListener('click', () => {
       vscode.postMessage({ type: 'openFile', filePath: issue.location?.path, line });
     });
@@ -310,20 +391,43 @@ function renderTable() {
     `${filtered.length} issue${filtered.length !== 1 ? 's' : ''} shown  (${allIssues.length} total)`;
 }
 
-// ── Table sort ────────────────────────────────────────────────────────────────
+/**
+ * Builds a path cell: truncated directory on the left, bold filename.
+ * Uses flex so the dir part shrinks and the filename never clips.
+ * @param {string} p
+ */
+function makePathCell(p) {
+  const td = document.createElement('td');
+  td.className = 'cell-path';
+  td.title = p;
+
+  const slash = p.lastIndexOf('/');
+  const dir      = slash >= 0 ? p.slice(0, slash + 1) : '';
+  const filename = slash >= 0 ? p.slice(slash + 1)    : p;
+
+  if (dir) {
+    const spanDir = document.createElement('span');
+    spanDir.className = 'path-dir';
+    spanDir.textContent = dir;
+    td.appendChild(spanDir);
+  }
+
+  const strong = document.createElement('strong');
+  strong.className = 'path-file';
+  strong.textContent = filename;
+  td.appendChild(strong);
+
+  return td;
+}
+
+// ── Table header sort ─────────────────────────────────────────────────────────
 
 document.querySelectorAll('#issues-table th[data-col]').forEach((th) => {
   th.addEventListener('click', () => {
     const col = th.getAttribute('data-col') ?? '';
-    if (sortState.col === col) {
-      sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
-    } else {
-      sortState.col = col;
-      sortState.dir = 'asc';
-    }
-    document.querySelectorAll('#issues-table th[data-col]').forEach((h) => {
-      h.classList.remove('sort-asc', 'sort-desc');
-    });
+    sortState.dir = (sortState.col === col && sortState.dir === 'asc') ? 'desc' : 'asc';
+    sortState.col = col;
+    document.querySelectorAll('#issues-table th[data-col]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
     th.classList.add(sortState.dir === 'asc' ? 'sort-asc' : 'sort-desc');
     renderTable();
   });
@@ -335,26 +439,15 @@ function getBeginLine(issue) {
   return resolveLineRef(issue.location?.lines?.begin ?? issue.location?.positions?.begin);
 }
 
-/**
- * Resolves a LineRef to a 1-based integer.
- * Handles: plain number, {line, column} object (non-standard), or undefined.
- */
 function resolveLineRef(ref) {
   if (ref === undefined || ref === null) return 1;
-  if (typeof ref === 'object' && 'line' in ref) {
-    const n = Number(ref.line);
-    return n > 0 ? n : 1;
-  }
+  if (typeof ref === 'object' && 'line' in ref) { const n = Number(ref.line); return n > 0 ? n : 1; }
   const n = Number(ref);
   return n > 0 ? n : 1;
 }
 
 function esc(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function el(id) {

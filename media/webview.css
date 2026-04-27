@@ -159,6 +159,27 @@ h3 {
   outline: 1px solid var(--vscode-focusBorder, #007acc);
 }
 
+/* ── Active filter chips ─────────────────────────────────────────────────────── */
+
+#active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 12px;
+  border-radius: 12px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  font-size: 0.82em;
+  border: 1px solid var(--vscode-focusBorder, #007acc);
+}
+
 /* ── Table ───────────────────────────────────────────────────────────────────── */
 
 #table-container {
@@ -224,16 +245,42 @@ h3 {
   font-size: 0.9em;
 }
 
-/* Path column: truncate from the LEFT so the filename/end is always visible */
+/* Cells whose value can be clicked to apply a quick filter */
+.cell-clickable {
+  cursor: crosshair;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.cell-clickable:hover {
+  color: var(--vscode-textLink-activeForeground, #4fc3f7);
+}
+.cell-active-filter {
+  font-weight: 700;
+  color: var(--vscode-textLink-activeForeground, #4fc3f7);
+}
+
+/* Path column: flex layout — dir shrinks+truncates left, filename stays bold */
 .cell-path {
+  max-width: 300px;
+  display: flex;
+  align-items: center;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 260px;
-  direction: rtl;       /* makes overflow happen on the left side */
-  text-align: left;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.9em;
+}
+.path-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;       /* overflow ellipsis appears on the left */
+  text-align: left;
+  opacity: 0.7;
+}
+.path-file {
+  flex: 0 0 auto;
+  font-weight: 700;
 }
 
 .cell-desc {
@@ -263,11 +310,11 @@ h3 {
   white-space: nowrap;
 }
 
-.sev-blocker  { background: #ff3b30; }
-.sev-critical { background: #ff6b35; }
-.sev-major    { background: #ff9f0a; color: #1a1a1a; }
-.sev-minor    { background: #ffd60a; color: #1a1a1a; }
-.sev-info     { background: #0a84ff; }
+.sev-blocker  { background: #7b1fa2; }
+.sev-critical { background: #e53935; }
+.sev-major    { background: #f4511e; }
+.sev-minor    { background: #f9a825; color: #1a1a1a; }
+.sev-info     { background: #78909c; }
 
 /* ── Category badges ─────────────────────────────────────────────────────────── */
 
@@ -284,11 +331,11 @@ h3 {
 
 /* ── Row left-border accent by severity ──────────────────────────────────────── */
 
-.row-sev-blocker  td:first-child { border-left: 3px solid #ff3b30; }
-.row-sev-critical td:first-child { border-left: 3px solid #ff6b35; }
-.row-sev-major    td:first-child { border-left: 3px solid #ff9f0a; }
-.row-sev-minor    td:first-child { border-left: 3px solid #ffd60a; }
-.row-sev-info     td:first-child { border-left: 3px solid #0a84ff; }
+.row-sev-blocker  td:first-child { border-left: 3px solid #7b1fa2; }
+.row-sev-critical td:first-child { border-left: 3px solid #e53935; }
+.row-sev-major    td:first-child { border-left: 3px solid #f4511e; }
+.row-sev-minor    td:first-child { border-left: 3px solid #f9a825; }
+.row-sev-info     td:first-child { border-left: 3px solid #78909c; }
 
 /* ── Table footer ────────────────────────────────────────────────────────────── */
 
