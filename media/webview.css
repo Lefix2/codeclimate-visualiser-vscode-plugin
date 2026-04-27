@@ -1,0 +1,290 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground, #ccc);
+  background: var(--vscode-editor-background, #1e1e1e);
+  padding: 16px;
+  line-height: 1.4;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────────── */
+
+#header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+h1 {
+  font-size: 1.25em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+h3 {
+  font-size: 0.9em;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+#file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  border-radius: 12px;
+  padding: 2px 10px 2px 12px;
+  font-size: 0.82em;
+}
+
+.chip-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  opacity: 0.6;
+}
+
+.chip-remove:hover { opacity: 1; }
+
+/* ── Empty state ─────────────────────────────────────────────────────────────── */
+
+#empty-state {
+  margin-top: 60px;
+  text-align: center;
+  opacity: 0.6;
+  line-height: 2;
+}
+
+#empty-state code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  background: var(--vscode-textCodeBlock-background, #2d2d2d);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ── Charts row ──────────────────────────────────────────────────────────────── */
+
+#charts-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.chart-card {
+  flex: 1 1 200px;
+  max-width: 300px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.chart-card canvas {
+  max-height: 200px;
+}
+
+/* ── Filters ─────────────────────────────────────────────────────────────────── */
+
+#filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+}
+
+.filter-label {
+  font-weight: 600;
+  font-size: 0.82em;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+#filter-severity,
+#filter-sourcefile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 0.82em;
+  user-select: none;
+}
+
+#filter-search {
+  flex: 1 1 200px;
+  padding: 4px 8px;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.9em;
+}
+
+#filter-search:focus {
+  outline: 1px solid var(--vscode-focusBorder, #007acc);
+}
+
+/* ── Table ───────────────────────────────────────────────────────────────────── */
+
+#table-container {
+  overflow-x: auto;
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+}
+
+#issues-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86em;
+}
+
+#issues-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d2d);
+  color: var(--vscode-tab-activeForeground, #fff);
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 2px solid var(--vscode-editorWidget-border, #454545);
+  cursor: pointer;
+  user-select: none;
+}
+
+#issues-table thead th:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+#issues-table thead th.sort-asc::after  { content: ' ▲'; font-size: 0.75em; }
+#issues-table thead th.sort-desc::after { content: ' ▼'; font-size: 0.75em; }
+
+#issues-table tbody td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #333);
+  vertical-align: middle;
+  max-width: 220px;
+}
+
+#issues-table tbody tr {
+  cursor: pointer;
+}
+
+#issues-table tbody tr:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+#issues-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.cell-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+}
+
+.cell-desc {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Severity badges ─────────────────────────────────────────────────────────── */
+
+.severity-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.78em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.sev-blocker  { background: #ff3b30; }
+.sev-critical { background: #ff6b35; }
+.sev-major    { background: #ff9f0a; color: #1a1a1a; }
+.sev-minor    { background: #ffd60a; color: #1a1a1a; }
+.sev-info     { background: #0a84ff; }
+
+/* ── Category badges ─────────────────────────────────────────────────────────── */
+
+.cat-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.76em;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  margin-right: 3px;
+  white-space: nowrap;
+}
+
+/* ── Row left-border accent by severity ──────────────────────────────────────── */
+
+.row-sev-blocker  td:first-child { border-left: 3px solid #ff3b30; }
+.row-sev-critical td:first-child { border-left: 3px solid #ff6b35; }
+.row-sev-major    td:first-child { border-left: 3px solid #ff9f0a; }
+.row-sev-minor    td:first-child { border-left: 3px solid #ffd60a; }
+.row-sev-info     td:first-child { border-left: 3px solid #0a84ff; }
+
+/* ── Table footer ────────────────────────────────────────────────────────────── */
+
+#table-footer {
+  padding: 6px 10px;
+  font-size: 0.82em;
+  opacity: 0.6;
+  text-align: right;
+  background: var(--vscode-editorWidget-background, #252526);
+  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+}

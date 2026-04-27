@@ -1,0 +1,53 @@
+{
+  "name": "codeclimate-visualiser",
+  "displayName": "CodeClimate Visualiser",
+  "description": "Visualise CodeClimate JSON/NDJSON reports: charts by severity, category and check name, filterable issue table, inline editor decorations and one-click file navigation.",
+  "version": "0.1.0",
+  "publisher": "lefix2",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other", "Visualization"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeclimateVisualiser.openFiles",
+        "title": "CodeClimate: Open Report(s)",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "codeclimateVisualiser.clearAll",
+        "title": "CodeClimate: Clear All",
+        "icon": "$(clear-all)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "codeclimateVisualiser.openFiles",
+          "when": "resourceExtname == .json",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "codeclimateVisualiser.openFiles",
+          "when": "resourceExtname == .json",
+          "group": "navigation@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
