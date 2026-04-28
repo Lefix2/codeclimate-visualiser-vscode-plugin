@@ -1,6 +1,9 @@
 // @ts-check
 'use strict';
 
+// Configure Prism before its script loads (set via inline <script> before prism.min.js)
+if (window.Prism) { window.Prism.manual = true; }
+
 const vscode = acquireVsCodeApi();
 
 const SEVERITY_ORDER = ['blocker', 'critical', 'major', 'minor', 'info'];
@@ -23,20 +26,70 @@ let allIssues = [];
 /** @type {any[]} */
 let allFiles = [];
 
-/** @type {{ severities: Set<string>, sourceFiles: Set<string>, search: string }} */
+/**
+ * @type {{
+ *   severities: Set<string>,
+ *   categories: Set<string>|null,
+ *   quickTerms: Set<string>,
+ *   sourceFiles: Set<string>,
+ *   search: string
+ * }}
+ */
 let filters = {
   severities: new Set(SEVERITY_ORDER),
+  categories: null,
+  quickTerms: new Set(),
   sourceFiles: new Set(),
   search: '',
 };
+
+/** @type {{ showChartLegends: boolean }} */
+let config = { showChartLegends: false };
 
 /** @type {{ col: string, dir: 'asc'|'desc' }} */
 let sortState = { col: 'severity', dir: 'asc' };
 /** @type {Record<string, any>} */
 const charts = {};
 
-/** @type {Set<string>} issue IDs currently expanded */
+/** @type {Set<string>} expanded issue IDs */
 const expandedIds = new Set();
+
+/** IDs expanded in the CURRENT renderTable call — animate only these */
+const newlyExpandedIds = new Set();
+
+/** @type {Map<string, {lines: Array<{number:number,text:string}>, highlightLine:number}>} */
+const snippetCache = new Map();
+
+/** @type {Map<string, string>} snippet id → Prism language string */
+const snippetMeta = new Map();
+
+// ── Prism language detection ──────────────────────────────────────────────────
+
+/** Map file extension → Prism language identifier */
+function extToLang(filePath) {
+  const ext = (filePath.split('.').pop() ?? '').toLowerCase();
+  /** @type {Record<string,string>} */
+  const map = {
+    js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx',
+    rb: 'ruby', py: 'python', go: 'go', java: 'java',
+    php: 'php', cs: 'csharp', cpp: 'cpp', cc: 'cpp', cxx: 'cpp',
+    c: 'c', h: 'c', rs: 'rust', swift: 'swift',
+    kt: 'kotlin', scala: 'scala', sh: 'bash', bash: 'bash',
+    css: 'css', scss: 'scss', sass: 'scss', html: 'html', xml: 'xml',
+    json: 'json', yaml: 'yaml', yml: 'yaml', md: 'markdown', sql: 'sql',
+    ex: 'elixir', exs: 'elixir', erl: 'erlang', lua: 'lua',
+    r: 'r', pl: 'perl', pm: 'perl',
+  };
+  return map[ext] ?? 'plain';
+}
+
+/** Highlight a single line of code using Prism if grammar is available */
+function prismHighlight(text, lang) {
+  if (lang === 'plain' || !window.Prism) return null;
+  const grammar = window.Prism.languages[lang];
+  if (!grammar) return null;
+  try { return window.Prism.highlight(text ?? '', grammar, lang); } catch { return null; }
+}
 
 // ── Message handling ──────────────────────────────────────────────────────────
 
@@ -45,25 +98,37 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'updateIssues') {
     allIssues = msg.issues ?? [];
     allFiles  = msg.files  ?? [];
+    if (msg.config) config = { ...config, ...msg.config };
     filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
     render();
+  } else if (msg.type === 'snippet') {
+    snippetCache.set(msg.issueId, { lines: msg.lines, highlightLine: msg.highlightLine });
+    const container = document.getElementById(snippetContainerId(msg.issueId));
+    const lang = snippetMeta.get(msg.issueId) ?? 'plain';
+    if (container) renderSnippet(container, msg.lines, msg.highlightLine, lang);
   }
 });
 
 // ── Filtering ─────────────────────────────────────────────────────────────────
 
-/** Parse ';'-separated search string into trimmed non-empty terms */
 function parseTerms() {
   return filters.search.split(';').map(t => t.trim().toLowerCase()).filter(Boolean);
 }
 
 function getFiltered() {
-  const terms = parseTerms();
+  const typedTerms = parseTerms();
   return allIssues.filter((issue) => {
     if (!filters.severities.has(issue.severity ?? 'info')) return false;
     if (!filters.sourceFiles.has(issue.sourceUri))         return false;
-    if (terms.length === 0) return true;
-    return terms.every(term => matchesTerm(issue, term));
+    if (filters.categories !== null) {
+      const cats = issue.categories ?? [];
+      if (!cats.some(/** @param {string} c */ c => filters.categories.has(c))) return false;
+    }
+    for (const term of filters.quickTerms) {
+      if (!matchesTerm(issue, term.toLowerCase())) return false;
+    }
+    if (typedTerms.length === 0) return true;
+    return typedTerms.every(term => matchesTerm(issue, term));
   });
 }
 
@@ -77,26 +142,38 @@ function matchesTerm(issue, term) {
   );
 }
 
-/**
- * Add or remove `value` from the ';'-separated search string (toggle).
- * Updates the search input and re-renders.
- * @param {string} value
- */
+/** @param {string} value */
+function applyQuickFilter(value) {
+  const v = value.trim();
+  const existing = [...filters.quickTerms].find(t => t.toLowerCase() === v.toLowerCase());
+  if (existing !== undefined) filters.quickTerms.delete(existing);
+  else filters.quickTerms.add(v);
+  renderActiveFilters(); renderCharts(); renderTable();
+}
+
+/** @param {string} value */
 function applySearchTerm(value) {
   const v = value.trim();
   const terms = filters.search.split(';').map(t => t.trim()).filter(Boolean);
   const idx = terms.findIndex(t => t.toLowerCase() === v.toLowerCase());
-  if (idx >= 0) {
-    terms.splice(idx, 1);
-  } else {
-    terms.push(v);
-  }
+  if (idx >= 0) terms.splice(idx, 1); else terms.push(v);
   filters.search = terms.join('; ');
   const inp = /** @type {HTMLInputElement|null} */(document.getElementById('filter-search'));
   if (inp) inp.value = filters.search;
-  renderActiveFilters();
-  renderCharts();
-  renderTable();
+  renderActiveFilters(); renderCharts(); renderTable();
+}
+
+/** @param {string} cat */
+function toggleCategoryFilter(cat) {
+  if (filters.categories === null) {
+    filters.categories = new Set([cat]);
+  } else if (filters.categories.has(cat)) {
+    filters.categories.delete(cat);
+    if (filters.categories.size === 0) filters.categories = null;
+  } else {
+    filters.categories.add(cat);
+  }
+  renderActiveFilters(); renderCharts(); renderTable();
 }
 
 // ── Sorting ───────────────────────────────────────────────────────────────────
@@ -128,10 +205,8 @@ function render() {
   el('empty-state').style.display  = hasData ? 'none' : '';
   el('main-content').style.display = hasData ? ''     : 'none';
   if (!hasData) return;
-
   renderFileChips();
   renderSeverityFilter();
-  renderSourceFileFilter();
   renderActiveFilters();
   renderCharts();
   renderTable();
@@ -179,51 +254,47 @@ function renderSeverityFilter() {
   }
 }
 
-function renderSourceFileFilter() {
-  const container = el('filter-sourcefile');
-  container.innerHTML = '';
-  if (allFiles.length <= 1) return;
-  container.innerHTML = '<span class="filter-label">File:</span>';
-  for (const file of allFiles) {
-    const label = document.createElement('label');
-    label.className = 'filter-checkbox';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = filters.sourceFiles.has(file.uri);
-    cb.addEventListener('change', () => {
-      cb.checked ? filters.sourceFiles.add(file.uri) : filters.sourceFiles.delete(file.uri);
-      renderCharts(); renderTable();
-    });
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(' ' + file.filename));
-    container.appendChild(label);
-  }
+/** Isolate one source file (click again to restore all — same pattern as severity chart). */
+function toggleSourceFileFilter(filename) {
+  const file = allFiles.find(f => f.filename === filename);
+  if (!file) return;
+  const isIsolated = filters.sourceFiles.size === 1 && filters.sourceFiles.has(file.uri);
+  filters.sourceFiles = isIsolated
+    ? new Set(allFiles.map(/** @param {any} f */ f => f.uri))
+    : new Set([file.uri]);
+  renderCharts(); renderTable();
 }
 
-/** Active search terms shown as removable chips */
 function renderActiveFilters() {
   const container = el('active-filters');
   container.innerHTML = '';
-  const terms = parseTerms();
-  for (const term of terms) {
-    const chip = document.createElement('span');
-    chip.className = 'active-filter-chip';
-    const lbl = document.createElement('span');
-    lbl.textContent = term;
-    const btn = document.createElement('button');
-    btn.className = 'chip-remove';
-    btn.title = 'Remove filter';
-    btn.textContent = '×';
-    btn.addEventListener('click', () => {
-      const kept = parseTerms().filter(t => t.toLowerCase() !== term.toLowerCase());
-      filters.search = kept.join('; ');
-      const inp = /** @type {HTMLInputElement|null} */(document.getElementById('filter-search'));
-      if (inp) inp.value = filters.search;
-      renderActiveFilters(); renderCharts(); renderTable();
-    });
-    chip.appendChild(lbl); chip.appendChild(btn);
-    container.appendChild(chip);
+  if (filters.categories !== null) {
+    for (const cat of filters.categories) {
+      container.appendChild(makeChip('cat: ' + cat, 'cat-filter-chip', () => toggleCategoryFilter(cat)));
+    }
   }
+  for (const term of filters.quickTerms) {
+    container.appendChild(makeChip(term, '', () => applyQuickFilter(term)));
+  }
+}
+
+/**
+ * @param {string} text
+ * @param {string} extraClass
+ * @param {() => void} onRemove
+ */
+function makeChip(text, extraClass, onRemove) {
+  const chip = document.createElement('span');
+  chip.className = 'active-filter-chip' + (extraClass ? ' ' + extraClass : '');
+  const lbl = document.createElement('span');
+  lbl.textContent = text;
+  const btn = document.createElement('button');
+  btn.className = 'chip-remove';
+  btn.title = 'Remove filter';
+  btn.textContent = '×';
+  btn.addEventListener('click', onRemove);
+  chip.appendChild(lbl); chip.appendChild(btn);
+  return chip;
 }
 
 document.getElementById('filter-search')?.addEventListener('input', (e) => {
@@ -235,9 +306,25 @@ document.getElementById('filter-search')?.addEventListener('input', (e) => {
 
 function renderCharts() {
   const filtered = getFiltered();
-  renderPieChart('chart-severity',  countBy(filtered, i => [i.severity ?? 'info'],                             SEVERITY_ORDER, SEVERITY_COLORS));
-  renderPieChart('chart-category',  countBy(filtered, i => i.categories?.length ? i.categories : ['Uncategorized']));
-  renderPieChart('chart-checkname', topN(countBy(filtered, i => [i.check_name ?? '—']), 10));
+  renderPieChart('chart-severity',
+    countBy(filtered, i => [i.severity ?? 'info'], SEVERITY_ORDER, SEVERITY_COLORS),
+    (label) => {
+      const isIsolated = filters.severities.size === 1 && filters.severities.has(label);
+      filters.severities = isIsolated ? new Set(SEVERITY_ORDER) : new Set([label]);
+      renderSeverityFilter(); renderCharts(); renderTable();
+    });
+  renderPieChart('chart-category',
+    countBy(filtered, i => i.categories?.length ? i.categories : ['Uncategorized']),
+    (label) => toggleCategoryFilter(label));
+  renderPieChart('chart-checkname',
+    topN(countBy(filtered, i => [i.check_name ?? '—']), 10),
+    (label) => applyQuickFilter(label));
+  renderPieChart('chart-source',
+    countBy(filtered, i => [i.sourceFile ?? '—']),
+    (label) => toggleSourceFileFilter(label));
+  renderPieChart('chart-file',
+    topN(countBy(filtered, i => [basename(i.location?.path ?? '—')]), 10),
+    (label) => applyQuickFilter(label));
 }
 
 function countBy(issues, keyFn, order, colorMap = {}) {
@@ -254,17 +341,19 @@ function topN(data, n) {
   return { counts: top, colorMap: data.colorMap };
 }
 
-function renderPieChart(canvasId, { counts, colorMap }) {
+/**
+ * @param {string} canvasId
+ * @param {{ counts: Record<string,number>, colorMap: Record<string,string> }} data
+ * @param {(label: string) => void} onClickLabel
+ */
+function renderPieChart(canvasId, { counts, colorMap }, onClickLabel) {
   const canvas = /** @type {HTMLCanvasElement|null} */(document.getElementById(canvasId));
   if (!canvas) return;
-
   const labels = Object.keys(counts).filter(k => counts[k] > 0);
   const values = labels.map(l => counts[l]);
-
   if (charts[canvasId]) { charts[canvasId].destroy(); }
   if (labels.length === 0) return;
-
-  const total  = values.reduce((a, b) => a + b, 0);
+  const total   = values.reduce((a, b) => a + b, 0);
   const bgColor = getVsColor('--vscode-editor-background', '#1e1e1e');
   const fgColor = getVsColor('--vscode-foreground', '#cccccc');
 
@@ -283,14 +372,16 @@ function renderPieChart(canvasId, { counts, colorMap }) {
       responsive: true,
       maintainAspectRatio: true,
       onClick: (_evt, elements) => {
-        if (elements.length > 0) applySearchTerm(labels[elements[0].index]);
+        if (elements.length > 0) onClickLabel(labels[elements[0].index]);
       },
       onHover: (evt, elements) => {
         if (evt.native) /** @type {HTMLElement} */(evt.native.target).style.cursor =
           elements.length > 0 ? 'pointer' : 'default';
       },
       plugins: {
-        legend: { position: 'bottom', labels: { color: fgColor, padding: 8, font: { size: 11 }, boxWidth: 12 } },
+        legend: config.showChartLegends
+          ? { display: true, position: 'bottom', labels: { color: fgColor, padding: 8, font: { size: 11 }, boxWidth: 12 } }
+          : { display: false },
         tooltip: {
           callbacks: {
             label: ctx => ` ${ctx.label}: ${ctx.raw} (${Math.round(/** @type {number} */(ctx.raw) / total * 100)}%)`,
@@ -311,62 +402,60 @@ function renderTable() {
   const filtered = getSorted(getFiltered());
   const tbody = el('issues-tbody');
   tbody.innerHTML = '';
-  const terms = parseTerms();
+
+  // Issues count above the table
+  const countBar = document.getElementById('issues-count-bar');
+  if (countBar) {
+    countBar.textContent = filtered.length === allIssues.length
+      ? `${filtered.length} issue${filtered.length !== 1 ? 's' : ''}`
+      : `${filtered.length} of ${allIssues.length} issues`;
+  }
 
   for (const issue of filtered) {
-    const line = getBeginLine(issue);
-    const sev  = issue.severity ?? 'info';
+    const line     = getBeginLine(issue);
+    const sev      = issue.severity ?? 'info';
     const isExpanded = expandedIds.has(issue.id);
+    const filePath = issue.location?.path ?? '';
+    const fname    = basename(filePath);
 
     // ── Main row ──────────────────────────────────────────────────────────────
     const tr = document.createElement('tr');
     tr.className = `row-sev-${sev}${isExpanded ? ' row-expanded' : ''}`;
     tr.title = 'Click to expand';
 
-    // Severity
+    // Severity — click isolates
     const tdSev = document.createElement('td');
     const badge = document.createElement('span');
-    badge.className = `severity-badge sev-${sev}`;
+    badge.className = `severity-badge sev-${sev} sev-badge-btn`;
     badge.textContent = sev;
+    badge.title = `${sev} — click to isolate`;
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isIsolated = filters.severities.size === 1 && filters.severities.has(sev);
+      filters.severities = isIsolated ? new Set(SEVERITY_ORDER) : new Set([sev]);
+      renderSeverityFilter(); renderCharts(); renderTable();
+    });
     tdSev.appendChild(badge);
     tr.appendChild(tdSev);
 
-    // Category (clickable badges)
+    // Category
     const tdCat = document.createElement('td');
     for (const cat of (issue.categories ?? [])) {
       const b = document.createElement('span');
-      b.className = 'cat-badge cat-clickable';
+      const isCatActive = filters.categories !== null && filters.categories.has(cat);
+      b.className = 'cat-badge cat-clickable' + (isCatActive ? ' cat-active' : '');
       b.textContent = cat;
       b.title = `${cat} — click to filter`;
-      b.addEventListener('click', (e) => { e.stopPropagation(); applySearchTerm(cat); });
+      b.addEventListener('click', (e) => { e.stopPropagation(); toggleCategoryFilter(cat); });
       tdCat.appendChild(b);
     }
     tr.appendChild(tdCat);
 
-    // Check Name (clickable)
-    const tdCheck = document.createElement('td');
-    tdCheck.className = 'cell-truncate cell-clickable' + (isActiveFilter(terms, issue.check_name) ? ' cell-active-filter' : '');
-    tdCheck.title = `${issue.check_name} — click to filter`;
-    tdCheck.textContent = issue.check_name;
-    tdCheck.addEventListener('click', (e) => { e.stopPropagation(); applySearchTerm(issue.check_name); });
-    tr.appendChild(tdCheck);
-
-    // Source file (clickable)
-    const tdSrc = document.createElement('td');
-    tdSrc.className = 'cell-mono cell-truncate cell-clickable' + (isActiveFilter(terms, issue.sourceFile) ? ' cell-active-filter' : '');
-    tdSrc.title = `${issue.sourceFile} — click to filter`;
-    tdSrc.textContent = issue.sourceFile;
-    tdSrc.addEventListener('click', (e) => { e.stopPropagation(); applySearchTerm(issue.sourceFile); });
-    tr.appendChild(tdSrc);
-
-    // File — filename only, tooltip = full path, clickable
-    const path = issue.location?.path ?? '';
-    const fname = basename(path);
-    const tdFile = document.createElement('td');
-    tdFile.className = 'cell-mono cell-truncate cell-clickable' + (isActiveFilter(terms, fname) ? ' cell-active-filter' : '');
-    tdFile.title = `${path} — click to filter`;
-    tdFile.textContent = fname;
-    tdFile.addEventListener('click', (e) => { e.stopPropagation(); applySearchTerm(fname); });
+    // Check Name, Source file, File — filter text spans
+    tr.appendChild(makeFilterCell(issue.check_name ?? '', 'cell-mono', () => applyQuickFilter(issue.check_name ?? '')));
+    tr.appendChild(makeFilterCell(issue.sourceFile  ?? '', 'cell-mono', () => applyQuickFilter(issue.sourceFile  ?? '')));
+    const tdFile = makeFilterCell(fname, 'cell-mono', () => applyQuickFilter(fname));
+    tdFile.title = filePath;
     tr.appendChild(tdFile);
 
     // Line
@@ -375,30 +464,74 @@ function renderTable() {
     tdLine.textContent = String(line);
     tr.appendChild(tdLine);
 
-    // Description (truncated)
+    // Description
     const tdDesc = document.createElement('td');
-    tdDesc.className = 'cell-desc';
     tdDesc.title = issue.description;
     tdDesc.textContent = issue.description;
     tr.appendChild(tdDesc);
 
     // Row click → expand / collapse
     tr.addEventListener('click', () => {
-      if (expandedIds.has(issue.id)) expandedIds.delete(issue.id);
-      else expandedIds.add(issue.id);
+      if (expandedIds.has(issue.id)) {
+        expandedIds.delete(issue.id);
+      } else {
+        expandedIds.add(issue.id);
+        newlyExpandedIds.add(issue.id);
+        if (!snippetCache.has(issue.id)) {
+          snippetMeta.set(issue.id, extToLang(filePath));
+          vscode.postMessage({ type: 'requestSnippet', issueId: issue.id, filePath, line });
+        }
+        for (const [idx, ol] of (issue.other_locations ?? []).entries()) {
+          const olId = otherLocId(issue.id, idx);
+          if (!snippetCache.has(olId)) {
+            const olLine = resolveLineRef(ol.lines?.begin ?? ol.positions?.begin);
+            snippetMeta.set(olId, extToLang(ol.path ?? ''));
+            vscode.postMessage({ type: 'requestSnippet', issueId: olId, filePath: ol.path ?? '', line: olLine });
+          }
+        }
+      }
       renderTable();
     });
 
     tbody.appendChild(tr);
 
-    // ── Detail row (when expanded) ────────────────────────────────────────────
+    // ── Detail row ────────────────────────────────────────────────────────────
     if (isExpanded) {
-      tbody.appendChild(makeDetailRow(issue, line, path));
+      const detailTr = makeDetailRow(issue, line, filePath);
+      tbody.appendChild(detailTr);
+      const anim = detailTr.querySelector('.detail-anim');
+      if (newlyExpandedIds.has(issue.id)) {
+        // Animate slide-down only for newly expanded rows
+        if (anim) requestAnimationFrame(() => anim.classList.add('detail-anim-open'));
+      } else {
+        // Already expanded — show immediately, no animation
+        if (anim) anim.classList.add('detail-anim-open');
+      }
     }
   }
 
+  newlyExpandedIds.clear();
+
   el('table-footer').textContent =
     `${filtered.length} issue${filtered.length !== 1 ? 's' : ''} shown  (${allIssues.length} total)`;
+}
+
+/**
+ * Cell where only the text span is the filter hitbox; td does the clipping.
+ * @param {string} text
+ * @param {string} extraClass
+ * @param {() => void} onClick
+ */
+function makeFilterCell(text, extraClass, onClick) {
+  const td = document.createElement('td');
+  if (extraClass) td.className = extraClass;
+  const span = document.createElement('span');
+  span.className = 'filter-text' + (isActiveFilter(text) ? ' filter-text-active' : '');
+  span.title = `${text} — click to filter`;
+  span.textContent = text;
+  span.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+  td.appendChild(span);
+  return td;
 }
 
 /**
@@ -413,52 +546,157 @@ function makeDetailRow(issue, line, fullPath) {
   const td = document.createElement('td');
   td.colSpan = COL_COUNT;
 
+  const anim = document.createElement('div');
+  anim.className = 'detail-anim';
+
   const wrap = document.createElement('div');
   wrap.className = 'detail-content';
+  // Prevent detail content clicks from bubbling to tr (which has no handler but looks clickable)
+  wrap.addEventListener('click', e => e.stopPropagation());
 
-  /** @param {string} label @param {string|undefined} value @param {boolean} [mono] */
-  function addField(label, value, mono = false) {
-    if (!value) return;
-    const row = document.createElement('div');
-    row.className = 'detail-field';
-    const lbl = document.createElement('span');
-    lbl.className = 'detail-label';
-    lbl.textContent = label + ':';
-    const val = document.createElement('span');
-    val.className = 'detail-value' + (mono ? ' detail-mono' : '');
-    val.textContent = value;
-    row.appendChild(lbl); row.appendChild(val);
-    wrap.appendChild(row);
+  // 1. Full path:line — clickable, opens file
+  if (fullPath) {
+    const pathEl = document.createElement('div');
+    pathEl.className = 'detail-path-link';
+    pathEl.textContent = line ? `${fullPath}:${line}` : fullPath;
+    pathEl.title = 'Click to open in editor';
+    pathEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'openFile', filePath: fullPath, line });
+    });
+    wrap.appendChild(pathEl);
   }
 
-  addField('Full path', fullPath, true);
-  addField('Description', issue.description);
-  if (issue.content?.body) addField('Details', issue.content.body);
-  if (issue.fingerprint) addField('Fingerprint', issue.fingerprint, true);
-  if (issue.remediation_points) addField('Remediation', `${issue.remediation_points} pts`);
-  if (issue.other_locations?.length) {
-    addField('Other locations', issue.other_locations.map(/** @param {any} l */ l => l.path).join(', '), true);
+  // 2. Description
+  if (issue.description) {
+    const descEl = document.createElement('div');
+    descEl.className = 'detail-desc';
+    descEl.textContent = issue.description;
+    wrap.appendChild(descEl);
   }
 
-  const btn = document.createElement('button');
-  btn.className = 'open-file-btn';
-  btn.textContent = 'Open in editor ↗';
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    vscode.postMessage({ type: 'openFile', filePath: fullPath, line });
-  });
-  wrap.appendChild(btn);
+  // 3. Code snippet (main location)
+  wrap.appendChild(makeSnippetContainer(issue.id));
 
-  td.appendChild(wrap);
+  // 4. Body (fix guidance) — often markdown; show as pre-wrap
+  if (issue.content?.body) {
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'detail-body';
+    bodyEl.textContent = issue.content.body;
+    wrap.appendChild(bodyEl);
+  }
+
+  // 5. Other locations — each with label, clickable path, snippet
+  for (const [idx, ol] of (issue.other_locations ?? []).entries()) {
+    const olPath = ol.path ?? '';
+    const olLine = resolveLineRef(ol.lines?.begin ?? ol.positions?.begin);
+
+    const block = document.createElement('div');
+    block.className = 'other-loc-block';
+
+    const label = document.createElement('span');
+    label.className = 'other-loc-label';
+    label.textContent = 'Référencé ici';
+
+    const pathEl = document.createElement('span');
+    pathEl.className = 'other-loc-path detail-path-link';
+    pathEl.textContent = olLine ? `${olPath}:${olLine}` : olPath;
+    pathEl.title = 'Click to open in editor';
+    pathEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'openFile', filePath: olPath, line: olLine });
+    });
+
+    block.appendChild(label);
+    block.appendChild(pathEl);
+    block.appendChild(makeSnippetContainer(otherLocId(issue.id, idx)));
+    wrap.appendChild(block);
+  }
+
+  // 6. Fingerprint — right-aligned, click copies
+  if (issue.fingerprint) {
+    const fpEl = document.createElement('div');
+    fpEl.className = 'detail-fingerprint';
+    fpEl.textContent = issue.fingerprint;
+    fpEl.title = 'Click to copy fingerprint';
+    fpEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(issue.fingerprint).then(() => {
+        fpEl.textContent = 'Copied!';
+        fpEl.classList.add('copied');
+        setTimeout(() => { fpEl.textContent = issue.fingerprint; fpEl.classList.remove('copied'); }, 1500);
+      });
+    });
+    wrap.appendChild(fpEl);
+  }
+
+  anim.appendChild(wrap);
+  td.appendChild(anim);
   tr.appendChild(td);
   return tr;
 }
 
-/** True if `value` matches any active search term */
-function isActiveFilter(terms, value) {
-  if (!value || terms.length === 0) return false;
+/** @param {string} id */
+function makeSnippetContainer(id) {
+  const div = document.createElement('div');
+  div.className = 'snippet-container';
+  div.id = snippetContainerId(id);
+  const cached = snippetCache.get(id);
+  const lang = snippetMeta.get(id) ?? 'plain';
+  if (cached) {
+    renderSnippet(div, cached.lines, cached.highlightLine, lang);
+  } else {
+    div.innerHTML = '<span class="snippet-loading">Loading snippet…</span>';
+  }
+  return div;
+}
+
+/**
+ * @param {HTMLElement} container
+ * @param {Array<{number:number,text:string}>} lines
+ * @param {number} highlightLine
+ * @param {string} [lang]
+ */
+function renderSnippet(container, lines, highlightLine, lang = 'plain') {
+  container.innerHTML = '';
+  if (!lines || lines.length === 0) {
+    container.innerHTML = '<span class="snippet-loading">Snippet not available.</span>';
+    return;
+  }
+  const pre = document.createElement('pre');
+  pre.className = 'snippet-pre';
+  for (const { number, text } of lines) {
+    const lineEl = document.createElement('div');
+    lineEl.className = 'snippet-line' + (number === highlightLine ? ' snippet-hl' : '');
+    const numEl = document.createElement('span');
+    numEl.className = 'snippet-num';
+    numEl.textContent = String(number);
+    const textEl = document.createElement('span');
+    textEl.className = 'snippet-text';
+    const highlighted = prismHighlight(text ?? '', lang);
+    if (highlighted !== null) {
+      textEl.innerHTML = highlighted;
+    } else {
+      textEl.textContent = text ?? '';
+    }
+    lineEl.appendChild(numEl);
+    lineEl.appendChild(textEl);
+    pre.appendChild(lineEl);
+  }
+  container.appendChild(pre);
+}
+
+/** @param {string} issueId @param {number} idx */
+function otherLocId(issueId, idx) { return `${issueId}::ol::${idx}`; }
+
+/** @param {string} id */
+function snippetContainerId(id) { return 'snip-' + id.replace(/[^a-zA-Z0-9]/g, '_'); }
+
+function isActiveFilter(value) {
+  if (!value || filters.quickTerms.size === 0) return false;
   const lv = value.toLowerCase();
-  return terms.some(t => lv.includes(t));
+  for (const t of filters.quickTerms) { if (lv.includes(t.toLowerCase())) return true; }
+  return false;
 }
 
 // ── Table header sort ─────────────────────────────────────────────────────────
@@ -487,14 +725,6 @@ function resolveLineRef(ref) {
   return n > 0 ? n : 1;
 }
 
-function basename(p) {
-  return p.slice(p.lastIndexOf('/') + 1);
-}
+function basename(p) { return p.slice(p.lastIndexOf('/') + 1); }
 
-function esc(str) {
-  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function el(id) {
-  return /** @type {HTMLElement} */(document.getElementById(id));
-}
+function el(id) { return /** @type {HTMLElement} */(document.getElementById(id)); }

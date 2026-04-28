@@ -8,7 +8,8 @@
 
 body {
   font-family: var(--vscode-font-family, sans-serif);
-  font-size: var(--vscode-font-size, 13px);
+  /* Enforce a readable minimum; VS Code's variable can be as low as 11px */
+  font-size: max(13px, var(--vscode-font-size, 13px));
   color: var(--vscode-foreground, #ccc);
   background: var(--vscode-editor-background, #1e1e1e);
   padding: 16px;
@@ -113,11 +114,19 @@ h3 {
   flex-wrap: wrap;
   gap: 10px 16px;
   align-items: center;
-  margin-bottom: 12px;
   padding: 10px 14px;
   background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-editorWidget-border, #454545);
-  border-radius: 6px;
+  border-radius: 6px 6px 0 0;
+}
+
+#search-row {
+  padding: 8px 14px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  margin-bottom: 8px;
 }
 
 .filter-label {
@@ -145,7 +154,7 @@ h3 {
 }
 
 #filter-search {
-  flex: 1 1 200px;
+  width: 100%;
   padding: 4px 8px;
   background: var(--vscode-input-background, #3c3c3c);
   color: var(--vscode-input-foreground, #ccc);
@@ -166,6 +175,7 @@ h3 {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
+  min-height: 4px;
 }
 
 .active-filter-chip {
@@ -180,6 +190,10 @@ h3 {
   border: 1px solid var(--vscode-focusBorder, #007acc);
 }
 
+.cat-filter-chip {
+  border-color: var(--vscode-charts-green, #4ec9b0);
+}
+
 /* ── Table ───────────────────────────────────────────────────────────────────── */
 
 #table-container {
@@ -191,7 +205,8 @@ h3 {
 #issues-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.86em;
+  font-size: 1em;      /* inherit body — no downscaling */
+  table-layout: auto;
 }
 
 #issues-table thead th {
@@ -219,8 +234,31 @@ h3 {
   padding: 5px 10px;
   border-bottom: 1px solid var(--vscode-editorWidget-border, #333);
   vertical-align: middle;
-  max-width: 220px;
+  /* no cursor / hover on td — only on .filter-text span */
 }
+
+/* Per-column constraints */
+#issues-table tbody td:nth-child(1),
+#issues-table thead th:nth-child(1) { white-space: nowrap; }          /* severity */
+
+#issues-table tbody td:nth-child(2),
+#issues-table thead th:nth-child(2) { min-width: 50px; max-width: 160px; } /* category */
+
+/* cols 3-5: td clips text; .filter-text span (inline) just covers the text glyphs */
+#issues-table tbody td:nth-child(3),
+#issues-table thead th:nth-child(3) { min-width: 120px; max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* check name */
+
+#issues-table tbody td:nth-child(4),
+#issues-table thead th:nth-child(4) { min-width: 50px; max-width: 140px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* source */
+
+#issues-table tbody td:nth-child(5),
+#issues-table thead th:nth-child(5) { min-width: 50px; max-width: 200px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* file */
+
+#issues-table tbody td:nth-child(6),
+#issues-table thead th:nth-child(6) { white-space: nowrap; text-align: right; } /* line */
+
+#issues-table tbody td:nth-child(7),
+#issues-table thead th:nth-child(7) { min-width: 160px; max-width: 420px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* description */
 
 #issues-table tbody tr {
   cursor: pointer;
@@ -234,46 +272,29 @@ h3 {
   border-bottom: none;
 }
 
-.cell-truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* ── Filter text span (hitbox = text glyphs only, td does the clipping) ─────── */
 
-.cell-mono {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 0.9em;
-}
-
-/* Cells whose value can be clicked to apply a quick filter */
-.cell-clickable {
+.filter-text {
+  /* inline: span covers only the actual text, not the whole cell */
+  display: inline;
   cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 2px;
 }
-.cell-clickable:hover {
+.filter-text:hover {
   color: var(--vscode-textLink-activeForeground, #4fc3f7);
 }
-.cell-active-filter {
+.filter-text-active {
   font-weight: 700;
   color: var(--vscode-textLink-activeForeground, #4fc3f7);
 }
 
-.cat-clickable {
-  cursor: pointer;
-}
-.cat-clickable:hover {
-  opacity: 0.8;
-  outline: 1px solid currentColor;
+.cell-mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.95em;
 }
 
-
-.cell-desc {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* .cell-desc truncation is handled by the td nth-child(7) rule above */
 
 .cell-num {
   text-align: right;
@@ -301,6 +322,13 @@ h3 {
 .sev-minor    { background: #f9a825; color: #1a1a1a; }
 .sev-info     { background: #78909c; }
 
+.sev-badge-btn {
+  cursor: pointer;
+}
+.sev-badge-btn:hover {
+  filter: brightness(1.2);
+}
+
 /* ── Category badges ─────────────────────────────────────────────────────────── */
 
 .cat-badge {
@@ -312,6 +340,16 @@ h3 {
   color: var(--vscode-badge-foreground, #fff);
   margin-right: 3px;
   white-space: nowrap;
+  cursor: pointer;
+}
+.cat-badge:hover {
+  opacity: 0.8;
+  outline: 1px solid currentColor;
+}
+.cat-active {
+  outline: 2px solid var(--vscode-focusBorder, #007acc);
+  outline-offset: 1px;
+  font-weight: 700;
 }
 
 /* ── Row left-border accent by severity ──────────────────────────────────────── */
@@ -331,64 +369,218 @@ h3 {
   border-left-width: 4px !important;
 }
 
+.detail-row {
+  cursor: default;
+}
+
 .detail-row td {
   padding: 0;
   border-bottom: 2px solid var(--vscode-editorWidget-border, #454545);
 }
 
+/* Slide-down animation */
+.detail-anim {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease-out;
+}
+.detail-anim-open {
+  grid-template-rows: 1fr;
+}
+.detail-anim > * {
+  overflow: hidden;
+}
+
+/* ── Detail content ──────────────────────────────────────────────────────────── */
+
 .detail-content {
-  padding: 10px 14px 12px 24px;
+  padding: 12px 16px 14px 28px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 24px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
   background: var(--vscode-editorWidget-background, #252526);
 }
 
-.detail-field {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  min-width: 0;
-  flex: 1 1 300px;
-}
-
-.detail-label {
-  font-weight: 600;
-  font-size: 0.8em;
-  opacity: 0.65;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.detail-value {
-  font-size: 0.86em;
-  word-break: break-all;
-}
-
-.detail-mono {
+/* 1. Full path — no label, link style */
+.detail-path-link {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 0.82em;
+  font-size: 1em;
+  cursor: pointer;
+  color: var(--vscode-textLink-foreground, #4ec9b0);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+  align-self: flex-start;
+}
+.detail-path-link:hover {
+  color: var(--vscode-textLink-activeForeground, #4fc3f7);
+}
+
+/* 2. Description */
+.detail-desc {
+  font-size: max(13px, var(--vscode-font-size, 13px));
+  opacity: 0.9;
+  line-height: 1.5;
+}
+
+/* 4. Body (fix guidance) */
+.detail-body {
+  font-size: max(12px, var(--vscode-font-size, 13px));
+  opacity: 0.8;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  border-left: 2px solid var(--vscode-editorWidget-border, #454545);
+  padding-left: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* 5. Other locations */
+.other-loc-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 0 0;
+  border-top: 1px solid var(--vscode-editorWidget-border, #3a3a3a);
+}
+
+.other-loc-label {
+  font-size: 0.85em;
+  font-weight: 700;
+  opacity: 0.55;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.other-loc-path {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: max(12px, var(--vscode-font-size, 13px));
   opacity: 0.85;
 }
 
-.open-file-btn {
-  margin-top: 4px;
-  padding: 3px 10px;
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 0.82em;
-  font-family: inherit;
-  white-space: nowrap;
-  flex-shrink: 0;
+/* 6. Fingerprint — right-aligned, clickable to copy */
+.detail-fingerprint {
   align-self: flex-end;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  opacity: 0.45;
+  letter-spacing: 0.02em;
+  margin-top: 4px;
+  cursor: copy;
+  user-select: all;
 }
-.open-file-btn:hover {
-  background: var(--vscode-button-hoverBackground, #1177bb);
+.detail-fingerprint:hover {
+  opacity: 0.75;
 }
+.detail-fingerprint.copied {
+  opacity: 0.9;
+  color: var(--vscode-charts-green, #4ec9b0);
+}
+
+/* ── Code snippet ────────────────────────────────────────────────────────────── */
+
+.snippet-container {
+  overflow: auto;
+  max-height: 220px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-editorWidget-border, #3a3a3a);
+  border-radius: 4px;
+}
+
+.snippet-loading {
+  display: block;
+  padding: 8px 12px;
+  font-size: 0.82em;
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.snippet-pre {
+  margin: 0;
+  padding: 4px 0;
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+  font-size: max(12px, var(--vscode-editor-font-size, 13px));
+  tab-size: 4;
+  line-height: 1.5;
+}
+
+.snippet-line {
+  display: flex;
+  white-space: pre;
+}
+
+.snippet-hl {
+  background: var(--vscode-editor-lineHighlightBackground, rgba(255, 255, 255, 0.07));
+  outline: 1px solid var(--vscode-editor-lineHighlightBorder, rgba(255,255,255,0.12));
+  outline-offset: -1px;
+}
+
+.snippet-num {
+  display: inline-block;
+  min-width: 36px;
+  padding: 0 10px 0 8px;
+  text-align: right;
+  color: var(--vscode-editorLineNumber-foreground, #858585);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.snippet-text {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  padding-right: 16px;
+}
+
+/* ── Issues count bar ────────────────────────────────────────────────────────── */
+
+#issues-count-bar {
+  padding: 4px 10px;
+  font-size: 0.88em;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Prism syntax token colours (VS Code dark+ palette) ──────────────────────── */
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata           { color: #6a9955; font-style: italic; }
+
+.token.punctuation     { color: #d4d4d4; }
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted         { color: #b5cea8; }
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted        { color: #ce9178; }
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string   { color: #d4d4d4; }
+
+.token.atrule,
+.token.attr-value,
+.token.keyword         { color: #569cd6; }
+
+.token.function,
+.token.class-name      { color: #dcdcaa; }
+
+.token.regex,
+.token.important,
+.token.variable        { color: #9cdcfe; }
+
+.token.namespace       { color: #4ec9b0; }
 
 /* ── Table footer ────────────────────────────────────────────────────────────── */
 

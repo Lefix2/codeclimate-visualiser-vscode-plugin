@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CodeClimate Visualiser project configuration",
+  "description": "Per-project configuration for the CodeClimate Visualiser VS Code extension. Place this file at .vscode/codeclimate-visualiser.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reportPatterns": {
+      "type": "array",
+      "description": "Glob patterns (workspace-relative) or absolute paths to CodeClimate JSON/NDJSON report files. Used by 'CodeClimate: Load from Configured Paths'.",
+      "items": {
+        "type": "string",
+        "description": "A glob pattern (e.g. '**/codeclimate.json', 'reports/*.json') or an absolute file path."
+      },
+      "default": [],
+      "examples": [
+        ["**/codeclimate.json"],
+        ["reports/codeclimate.json", "reports/rubocop.json"],
+        ["/home/user/project/codeclimate.json"]
+      ]
+    }
+  }
+}

@@ -4,23 +4,64 @@
   "description": "Visualise CodeClimate JSON/NDJSON reports: charts by severity, category and check name, filterable issue table, inline editor decorations and one-click file navigation.",
   "version": "0.1.0",
   "publisher": "lefix2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lefix2/codeclimate-visualiser-vscode-plugin.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other", "Visualization"],
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "CodeClimate Visualiser",
+      "properties": {
+        "codeclimateVisualiser.reportPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Glob patterns or absolute paths to CodeClimate JSON/NDJSON report files. Supports VS Code glob syntax (e.g. `**/codeclimate.json`, `reports/*.json`). Used by **CodeClimate: Load from Configured Paths**. Prefer `.vscode/codeclimate-visualiser.json` for per-project configuration."
+        },
+        "codeclimateVisualiser.showChartLegends": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show legends on the severity, category, and check-name charts."
+        }
+      }
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": ".vscode/codeclimate-visualiser.json",
+        "url": "./schemas/codeclimate-visualiser.schema.json"
+      }
+    ],
     "commands": [
+      {
+        "command": "codeclimateVisualiser.openView",
+        "title": "CodeClimate: Open View",
+        "icon": "$(graph)"
+      },
       {
         "command": "codeclimateVisualiser.openFiles",
         "title": "CodeClimate: Open Report(s)",
-        "icon": "$(graph)"
+        "icon": "$(folder-opened)"
       },
       {
         "command": "codeclimateVisualiser.clearAll",
         "title": "CodeClimate: Clear All",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "codeclimateVisualiser.loadFromConfig",
+        "title": "CodeClimate: Load from Configured Paths",
+        "icon": "$(search)"
       }
     ],
     "menus": {
@@ -43,11 +84,17 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.32.0",
     "typescript": "^5.3.0"
+  },
+  "overrides": {
+    "undici": "5"
   }
 }

@@ -1,6 +1,11 @@
-.gitignore
 .vscode/**
+.vscode-test/**
 src/**
-**/*.map
-tsconfig.json
+testdata/**
+out/**/*.map
 node_modules/**
+**/.gitignore
+**/.vscodeignore
+tsconfig.json
+*.vsix
+.claude/**
