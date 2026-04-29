@@ -5,18 +5,77 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "customColumns": {
+      "type": "array",
+      "description": "Extra columns to display in the issue table. Columns are ordered by their 'index' value alongside the built-in columns (Severity=0, Category=1, Check Name=2, Source=3, File=4, Line=5, Description=6). Custom columns with the same index as a built-in column appear after it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "index"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Column header label."
+          },
+          "index": {
+            "type": "integer",
+            "description": "Display position. Use built-in column indices as reference points: Severity=0, Category=1, Check Name=2, Source=3, File=4, Line=5, Description=6. Any value > 6 places the column after Description. Large values are clamped to last position."
+          }
+        }
+      },
+      "examples": [
+        [
+          { "name": "Subsystem", "index": 3 },
+          { "name": "Tool", "index": 4 }
+        ]
+      ]
+    },
     "reportPatterns": {
       "type": "array",
-      "description": "Glob patterns (workspace-relative) or absolute paths to CodeClimate JSON/NDJSON report files. Used by 'CodeClimate: Load from Configured Paths'.",
+      "description": "Glob patterns or absolute paths to CodeClimate JSON/NDJSON report files. Each entry is either a plain glob string or a pattern object with optional regex extraction for custom column values.",
       "items": {
-        "type": "string",
-        "description": "A glob pattern (e.g. '**/codeclimate.json', 'reports/*.json') or an absolute file path."
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "A glob pattern (e.g. '**/codeclimate.json') or absolute path. No custom column values."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["glob"],
+            "properties": {
+              "glob": {
+                "type": "string",
+                "description": "Workspace-relative glob pattern or absolute path."
+              },
+              "regex": {
+                "type": "string",
+                "description": "Optional regular expression applied to the matched filename (basename only). Capture groups can be referenced in 'values' using $0, $1, … (0-indexed capture group number)."
+              },
+              "values": {
+                "type": "object",
+                "description": "Map of custom column name → value for all issues from matched files. Use $0, $1, … to reference regex capture groups, or plain strings for static values. Omit or set to null for empty.",
+                "additionalProperties": {
+                  "type": ["string", "null"]
+                },
+                "examples": [
+                  { "Tool": "$0", "Subsystem": "$1" },
+                  { "Tool": "rubocop", "Subsystem": "" }
+                ]
+              }
+            }
+          }
+        ]
       },
-      "default": [],
       "examples": [
         ["**/codeclimate.json"],
-        ["reports/codeclimate.json", "reports/rubocop.json"],
-        ["/home/user/project/codeclimate.json"]
+        [
+          {
+            "glob": "reports/*-*.json",
+            "regex": "(\\w+)-(\\w+)\\.json",
+            "values": { "Tool": "$0", "Subsystem": "$1" }
+          }
+        ]
       ]
     }
   }

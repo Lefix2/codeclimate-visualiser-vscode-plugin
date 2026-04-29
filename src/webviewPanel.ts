@@ -64,7 +64,7 @@ export class CodeClimatePanel implements vscode.Disposable {
       type: 'updateIssues',
       files: this.issueManager.getFileInfos(),
       issues: this.issueManager.getAllIssues(),
-      config: { showChartLegends },
+      config: { showChartLegends, customColumns: this.issueManager.getCustomColumns() },
     });
   }
 
@@ -155,6 +155,7 @@ export class CodeClimatePanel implements vscode.Disposable {
 
       <div id="filters">
         <div id="filter-severity"></div>
+        <div id="filter-custom"></div>
       </div>
       <div id="search-row">
         <input type="text" id="filter-search" placeholder="Filter by description, file, check name, category… use ; to AND terms">
@@ -165,17 +166,7 @@ export class CodeClimatePanel implements vscode.Disposable {
 
       <div id="table-container">
         <table id="issues-table">
-          <thead>
-            <tr>
-              <th data-col="severity">Severity</th>
-              <th data-col="categories">Category</th>
-              <th data-col="check_name">Check Name</th>
-              <th data-col="sourceFile">Source</th>
-              <th data-col="file">File</th>
-              <th data-col="line">Line</th>
-              <th data-col="description">Description</th>
-            </tr>
-          </thead>
+          <thead id="issues-thead"></thead>
           <tbody id="issues-tbody"></tbody>
         </table>
         <div id="table-footer"></div>

@@ -42,6 +42,23 @@ export interface IssueWithSource extends CodeClimateIssue {
   sourceFile: string;
   sourceUri: string;
   id: string;
+  customColumns: Record<string, string>;
+}
+
+export interface CustomColumn {
+  name: string;
+  index: number;
+}
+
+export interface PatternEntry {
+  glob: string;
+  regex?: string;
+  values?: Record<string, string | null>;
+}
+
+export interface ProjectConfig {
+  reportPatterns?: (string | PatternEntry)[];
+  customColumns?: CustomColumn[];
 }
 
 export interface LoadedFileInfo {

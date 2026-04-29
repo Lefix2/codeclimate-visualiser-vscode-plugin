@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { parseCodeClimateFile } from './parser';
-import { IssueWithSource, LoadedFileInfo } from './types';
+import { CustomColumn, IssueWithSource, LoadedFileInfo } from './types';
 
 interface FileEntry {
   info: LoadedFileInfo;
@@ -13,8 +13,18 @@ export class IssueManager {
   private files = new Map<string, FileEntry>();
   private _onChange = new vscode.EventEmitter<void>();
   readonly onChange = this._onChange.event;
+  private _customColumns: CustomColumn[] = [];
 
-  loadFile(fileUri: vscode.Uri): void {
+  setCustomColumns(cols: CustomColumn[]): void {
+    this._customColumns = cols;
+    this._onChange.fire();
+  }
+
+  getCustomColumns(): CustomColumn[] {
+    return this._customColumns;
+  }
+
+  loadFile(fileUri: vscode.Uri, columnValues: Record<string, string> = {}): void {
     const content = fs.readFileSync(fileUri.fsPath, 'utf-8');
     const rawIssues = parseCodeClimateFile(content);
     const filename = path.basename(fileUri.fsPath);
@@ -25,6 +35,7 @@ export class IssueManager {
       sourceFile: filename,
       sourceUri: uri,
       id: `${uri}::${idx}`,
+      customColumns: columnValues,
     }));
 
     this.files.set(uri, {

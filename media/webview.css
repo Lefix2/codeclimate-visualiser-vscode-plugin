@@ -91,7 +91,9 @@ h3 {
   display: flex;
   gap: 12px;
   margin-bottom: 14px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 .chart-card {
@@ -137,11 +139,19 @@ h3 {
 }
 
 #filter-severity,
-#filter-sourcefile {
+#filter-sourcefile,
+.filter-group {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+#filter-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
 }
 
 .filter-checkbox {
@@ -237,28 +247,15 @@ h3 {
   /* no cursor / hover on td — only on .filter-text span */
 }
 
-/* Per-column constraints */
-#issues-table tbody td:nth-child(1),
-#issues-table thead th:nth-child(1) { white-space: nowrap; }          /* severity */
-
-#issues-table tbody td:nth-child(2),
-#issues-table thead th:nth-child(2) { min-width: 50px; max-width: 160px; } /* category */
-
-/* cols 3-5: td clips text; .filter-text span (inline) just covers the text glyphs */
-#issues-table tbody td:nth-child(3),
-#issues-table thead th:nth-child(3) { min-width: 120px; max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* check name */
-
-#issues-table tbody td:nth-child(4),
-#issues-table thead th:nth-child(4) { min-width: 50px; max-width: 140px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* source */
-
-#issues-table tbody td:nth-child(5),
-#issues-table thead th:nth-child(5) { min-width: 50px; max-width: 200px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* file */
-
-#issues-table tbody td:nth-child(6),
-#issues-table thead th:nth-child(6) { white-space: nowrap; text-align: right; } /* line */
-
-#issues-table tbody td:nth-child(7),
-#issues-table thead th:nth-child(7) { min-width: 160px; max-width: 420px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* description */
+/* Per-column constraints — class-based so order is independent of position */
+#issues-table .col-severity    { white-space: nowrap; }
+#issues-table .col-categories  { min-width: 50px;  max-width: 160px; }
+#issues-table .col-check_name  { min-width: 120px; max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-sourceFile  { min-width: 50px;  max-width: 140px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-file        { min-width: 50px;  max-width: 200px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-line        { white-space: nowrap; text-align: right; }
+#issues-table .col-description { min-width: 160px; max-width: 420px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-custom      { min-width: 60px;  max-width: 160px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 #issues-table tbody tr {
   cursor: pointer;

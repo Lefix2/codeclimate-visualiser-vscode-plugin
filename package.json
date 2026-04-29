@@ -33,6 +33,11 @@
           "type": "boolean",
           "default": false,
           "description": "Show legends on the severity, category, and check-name charts."
+        },
+        "codeclimateVisualiser.showLogConsole": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write diagnostic logs (file loads, pattern matches, errors) to the 'CodeClimate Visualiser' Output channel and reveal it automatically."
         }
       }
     },
@@ -91,7 +96,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^2.32.0",
+    "@vscode/vsce": "^3.9.1",
     "typescript": "^5.3.0"
   },
   "overrides": {
