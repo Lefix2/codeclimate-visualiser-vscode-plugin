@@ -1,15 +1,26 @@
 {
   "customColumns": [
-    { "name": "outil", "index": 3 },
-    { "name": "sous-système", "index": 4 }
+    {
+      "name": "outil",
+      "index": 3,
+      "showChart": true,
+      "showFilter": true
+    },
+    {
+      "name": "sous-système",
+      "index": 4,
+      "showChart": true,
+      "showFilter": true,
+      "fromField": "location.path",
+      "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
+    }
   ],
   "reportPatterns": [
     {
       "glob": "reports/*-*.json",
       "regex": "(\\w+)-(\\w+)\\.json",
       "values": {
-        "outil": "$0",
-        "sous-système": "$1"
+        "outil": "$0"
       }
     }
   ]

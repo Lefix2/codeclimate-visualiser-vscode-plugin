@@ -41,6 +41,24 @@
         }
       }
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeclimate-sidebar",
+          "title": "CodeClimate",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeclimate-sidebar": [
+        {
+          "type": "webview",
+          "id": "codeclimateVisualiser.sourcesView",
+          "name": "Reports"
+        }
+      ]
+    },
     "jsonValidation": [
       {
         "fileMatch": ".vscode/codeclimate-visualiser.json",

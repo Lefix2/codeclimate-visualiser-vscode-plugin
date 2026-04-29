@@ -20,15 +20,14 @@ const PALETTE = [
   '#f39c12','#9b59b6','#1abc9c','#34495e','#e67e22',
 ];
 
-// Base column definitions with their default sort index
+// Base column definitions with their default sort index (sourceFile removed — shown in detail panel)
 const BASE_COLS = [
   { key: 'severity',    label: 'Severity',    baseIndex: 0 },
   { key: 'categories',  label: 'Category',    baseIndex: 1 },
   { key: 'check_name',  label: 'Check Name',  baseIndex: 2 },
-  { key: 'sourceFile',  label: 'Source',      baseIndex: 3 },
-  { key: 'file',        label: 'File',        baseIndex: 4 },
-  { key: 'line',        label: 'Line',        baseIndex: 5 },
-  { key: 'description', label: 'Description', baseIndex: 6 },
+  { key: 'file',        label: 'File',        baseIndex: 3 },
+  { key: 'line',        label: 'Line',        baseIndex: 4 },
+  { key: 'description', label: 'Description', baseIndex: 5 },
 ];
 
 /** @type {any[]} */
@@ -122,6 +121,33 @@ function extToLang(filePath) {
   return map[ext] ?? 'plain';
 }
 
+// ── Custom column value resolution ───────────────────────────────────────────
+
+/** Read a dot-path from an object, e.g. "location.path" → issue.location.path */
+function getNestedField(obj, path) {
+  return path.split('.').reduce((o, k) => (o != null ? o[k] : undefined), obj);
+}
+
+/**
+ * Resolve the value of a custom column for a specific issue.
+ * fromField + fieldRegex takes priority over file-level values from PatternEntry.
+ * @param {any} issue
+ * @param {{name:string, fromField?:string, fieldRegex?:string, captureGroup?:number}} colDef
+ * @returns {string}
+ */
+function getIssueCustomValue(issue, colDef) {
+  if (colDef.fromField && colDef.fieldRegex) {
+    const fieldVal = String(getNestedField(issue, colDef.fromField) ?? '');
+    const match = fieldVal.match(new RegExp(colDef.fieldRegex));
+    if (match) {
+      const g = (colDef.captureGroup ?? 0) + 1; // regex match[0] = full, groups start at 1
+      return match[g] ?? '';
+    }
+    return '';
+  }
+  return (issue.customColumns ?? {})[colDef.name] ?? '';
+}
+
 /** Highlight a single line of code using Prism if grammar is available */
 function prismHighlight(text, lang) {
   if (lang === 'plain' || !window.Prism) return null;
@@ -175,7 +201,8 @@ function getFiltered() {
     // Custom column filters (AND between columns, OR within a column's values)
     for (const [colName, activeSet] of Object.entries(filters.custom)) {
       if (!activeSet || activeSet.size === 0) continue;
-      const val = (issue.customColumns ?? {})[colName] ?? '';
+      const colDef = customColumnDefs.find(c => c.name === colName);
+      const val = colDef ? getIssueCustomValue(issue, colDef) : (issue.customColumns ?? {})[colName] ?? '';
       if (!activeSet.has(val)) return false;
     }
     if (typedTerms.length === 0) return true;
@@ -296,32 +323,12 @@ function render() {
   el('empty-state').style.display  = hasData ? 'none' : '';
   el('main-content').style.display = hasData ? ''     : 'none';
   if (!hasData) return;
-  renderFileChips();
   renderSeverityFilter();
   renderCustomColumnFilters();
   renderActiveFilters();
   renderTableHeader();
   renderCharts();
   renderTable();
-}
-
-// ── File chips ────────────────────────────────────────────────────────────────
-
-function renderFileChips() {
-  const container = el('file-chips');
-  container.innerHTML = '';
-  for (const file of allFiles) {
-    const chip = document.createElement('span');
-    chip.className = 'file-chip';
-    chip.textContent = `${file.filename} (${file.issueCount})`;
-    const btn = document.createElement('button');
-    btn.className = 'chip-remove';
-    btn.title = 'Remove this file';
-    btn.textContent = '×';
-    btn.addEventListener('click', () => vscode.postMessage({ type: 'removeSourceFile', uri: file.uri }));
-    chip.appendChild(btn);
-    container.appendChild(chip);
-  }
 }
 
 // ── Filter bar ────────────────────────────────────────────────────────────────
@@ -353,7 +360,8 @@ function renderCustomColumnFilters() {
   container.innerHTML = '';
 
   for (const colDef of customColumnDefs) {
-    const values = [...new Set(allIssues.map(i => (i.customColumns ?? {})[colDef.name] ?? ''))].filter(v => v !== '').sort();
+    if (colDef.showFilter === false) continue;
+    const values = [...new Set(allIssues.map(i => getIssueCustomValue(i, colDef)))].filter(v => v !== '').sort();
     if (values.length <= 1) continue;
 
     const group = document.createElement('div');
@@ -471,6 +479,30 @@ function renderCharts() {
   renderPieChart('chart-file',
     topN(countBy(filtered, i => [basename(i.location?.path ?? '—')]), 10),
     (label) => applyQuickFilter(label));
+
+  // Dynamic custom column charts — destroy stale, rebuild
+  const chartsRow = document.getElementById('charts-row');
+  document.querySelectorAll('.chart-card-custom').forEach(card => {
+    const canvas = card.querySelector('canvas');
+    if (canvas && charts[canvas.id]) { charts[canvas.id].destroy(); delete charts[canvas.id]; }
+    card.remove();
+  });
+  for (const colDef of customColumnDefs) {
+    if (!colDef.showChart) continue;
+    const canvasId = 'chart-custom-' + colDef.name.replace(/[^a-zA-Z0-9]/g, '_');
+    const card = document.createElement('div');
+    card.className = 'chart-card chart-card-custom';
+    const h = document.createElement('h3');
+    h.textContent = colDef.name;
+    const canvas = document.createElement('canvas');
+    canvas.id = canvasId;
+    card.appendChild(h);
+    card.appendChild(canvas);
+    chartsRow?.appendChild(card);
+    renderPieChart(canvasId,
+      countBy(filtered, i => [getIssueCustomValue(i, colDef) || '—']),
+      (label) => { if (label !== '—') toggleCustomColumnFilter(colDef.name, label); });
+  }
 }
 
 function countBy(issues, keyFn, order, colorMap = {}) {
@@ -606,9 +638,6 @@ function renderTable() {
         case 'check_name':
           td = makeFilterCell(issue.check_name ?? '', 'cell-mono col-check_name', () => applyQuickFilter(issue.check_name ?? ''));
           break;
-        case 'sourceFile':
-          td = makeFilterCell(issue.sourceFile ?? '', 'cell-mono col-sourceFile', () => applyQuickFilter(issue.sourceFile ?? ''));
-          break;
         case 'file': {
           td = makeFilterCell(fname, 'cell-mono col-file', () => applyQuickFilter(fname));
           td.title = filePath;
@@ -629,8 +658,9 @@ function renderTable() {
         }
         default: {
           if (col.isCustom && col.name) {
-            const val = (issue.customColumns ?? {})[col.name] ?? '';
-            td = makeFilterCell(val, 'cell-mono col-custom', () => { if (val) toggleCustomColumnFilter(col.name ?? '', val); });
+            const colDef = customColumnDefs.find(c => c.name === col.name);
+            const val = colDef ? getIssueCustomValue(issue, colDef) : '';
+            td = makeFilterCell(val, 'cell-mono col-custom', () => { if (val && col.name) toggleCustomColumnFilter(col.name, val); });
           } else {
             td = document.createElement('td');
           }
@@ -780,7 +810,15 @@ function makeDetailRow(issue, line, fullPath, colSpan) {
     wrap.appendChild(block);
   }
 
-  // 6. Fingerprint — right-aligned, click copies
+  // 6. Source file label
+  if (issue.sourceFile) {
+    const srcEl = document.createElement('div');
+    srcEl.className = 'detail-source';
+    srcEl.textContent = issue.sourceFile;
+    wrap.appendChild(srcEl);
+  }
+
+  // 7. Fingerprint — right-aligned, click copies
   if (issue.fingerprint) {
     const fpEl = document.createElement('div');
     fpEl.className = 'detail-fingerprint';

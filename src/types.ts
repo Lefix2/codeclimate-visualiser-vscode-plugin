@@ -48,6 +48,11 @@ export interface IssueWithSource extends CodeClimateIssue {
 export interface CustomColumn {
   name: string;
   index: number;
+  showFilter?: boolean;    // default true — show filter badges in filter bar
+  showChart?: boolean;     // default false — show a pie chart for this column
+  fromField?: string;      // dot-path into issue object (e.g. "location.path")
+  fieldRegex?: string;     // regex applied to fromField value
+  captureGroup?: number;   // which capture group to use (0-indexed, default 0)
 }
 
 export interface PatternEntry {

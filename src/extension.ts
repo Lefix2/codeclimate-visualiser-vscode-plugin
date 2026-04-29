@@ -4,6 +4,7 @@ import { IssueManager } from './issueManager';
 import { DecorationProvider } from './decorationProvider';
 import { CodeClimatePanel } from './webviewPanel';
 import { PatternEntry, ProjectConfig } from './types';
+import { SourcesViewProvider } from './sourcesViewProvider';
 
 const logChannel = vscode.window.createOutputChannel('CodeClimate Visualiser');
 
@@ -79,7 +80,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const decorationProvider = new DecorationProvider(issueManager);
   const panel = new CodeClimatePanel(context, issueManager);
 
-  context.subscriptions.push(decorationProvider, panel, logChannel);
+  const sourcesView = new SourcesViewProvider(issueManager);
+  context.subscriptions.push(decorationProvider, panel, logChannel,
+    vscode.window.registerWebviewViewProvider(SourcesViewProvider.viewId, sourcesView));
+
 
   async function loadFromEntries(entries: ResolvedFile[]): Promise<number> {
     let loaded = 0;

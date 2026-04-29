@@ -133,11 +133,6 @@ export class CodeClimatePanel implements vscode.Disposable {
 </head>
 <body>
   <div id="app">
-    <div id="header">
-      <h1>&#9673; CodeClimate Visualiser</h1>
-      <div id="file-chips"></div>
-    </div>
-
     <div id="empty-state">
       <p>No CodeClimate report loaded.</p>
       <p>Run <strong>CodeClimate: Open Report(s)</strong> from the command palette,<br>
