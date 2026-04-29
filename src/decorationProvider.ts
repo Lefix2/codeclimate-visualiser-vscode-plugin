@@ -11,8 +11,10 @@ const SEVERITY_COLORS: Record<Severity, { border: string; overview: string }> = 
 };
 
 export class DecorationProvider implements vscode.Disposable {
-  // Full range (begin → end): coloured border + subtle background tint
-  private rangeDecTypes = new Map<Severity, vscode.TextEditorDecorationType>();
+  // Full line range (begin → end): coloured left border + subtle background tint
+  private rangeDecTypes   = new Map<Severity, vscode.TextEditorDecorationType>();
+  // Precise column range: coloured box around the exact symbol (when columns available)
+  private preciseDecTypes = new Map<Severity, vscode.TextEditorDecorationType>();
   private disposables: vscode.Disposable[] = [];
 
   constructor(private issueManager: IssueManager) {
@@ -27,6 +29,11 @@ export class DecorationProvider implements vscode.Disposable {
         isWholeLine: true,
       }));
 
+      this.preciseDecTypes.set(severity, vscode.window.createTextEditorDecorationType({
+        backgroundColor: colors.border + '45',
+        border: `1px solid ${colors.border}99`,
+        borderRadius: '2px',
+      }));
     }
 
     this.disposables.push(
@@ -50,52 +57,88 @@ export class DecorationProvider implements vscode.Disposable {
     const docPath = vscode.workspace.asRelativePath(editor.document.uri, false);
     const issues = this.issueManager.getIssuesForRelativePath(docPath);
 
-    const byS = new Map<Severity, vscode.DecorationOptions[]>();
-    for (const sev of Object.keys(SEVERITY_COLORS) as Severity[]) byS.set(sev, []);
+    type Opts = { range: vscode.DecorationOptions[]; precise: vscode.DecorationOptions[] };
+    const byS = new Map<Severity, Opts>();
+    for (const sev of Object.keys(SEVERITY_COLORS) as Severity[]) byS.set(sev, { range: [], precise: [] });
 
     for (const issue of issues) {
       const rawBegin = issue.location.lines?.begin ?? issue.location.positions?.begin;
       const rawEnd   = issue.location.lines?.end   ?? issue.location.positions?.end;
-      const beginLine = toLine(rawBegin as Parameters<typeof toLine>[0]) - 1;
+
+      const beginLine = toLine(rawBegin) - 1; // 0-indexed
       if (beginLine < 0) continue;
-      const endLine = toLine((rawEnd ?? rawBegin) as Parameters<typeof toLine>[0]) - 1;
+      const endLine   = toLine(rawEnd ?? rawBegin) - 1;
+      const beginCol  = toCol(rawBegin);
+      const endCol    = toCol(rawEnd ?? rawBegin);
 
       const sev: Severity = issue.severity ?? 'info';
-      const fullRange = new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER);
+      const entry = byS.get(sev);
+      if (!entry) continue;
 
-      byS.get(sev)?.push({
-        range: fullRange,
-        hoverMessage: new vscode.MarkdownString(
-          `**[${sev.toUpperCase()}]** \`${issue.check_name}\`  \n` +
-          `${issue.description}  \n\n` +
-          `*Lines ${beginLine + 1}–${endLine + 1} · ${issue.sourceFile}*`,
-        ),
+      const lines = beginLine === endLine
+        ? `Line ${beginLine + 1}`
+        : `Lines ${beginLine + 1}–${endLine + 1}`;
+      const body = issue.content?.body ? `\n\n---\n${issue.content.body}` : '';
+      const hover = new vscode.MarkdownString(
+        `**[${sev.toUpperCase()}]** \`${issue.check_name}\`  \n` +
+        `${issue.description}${body}  \n\n` +
+        `*${lines} · ${issue.sourceFile}*`,
+      );
+
+      // Whole-line decoration: border + tint spans begin → end
+      entry.range.push({
+        range: new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER),
+        hoverMessage: hover,
       });
+
+      // Precise decoration: coloured box on the exact column range (when available)
+      if (beginCol > 0) {
+        const colEnd = endCol > 0 ? endCol : beginCol + 1;
+        entry.precise.push({
+          range: new vscode.Range(beginLine, beginCol, Math.max(beginLine, endLine), colEnd),
+          hoverMessage: hover,
+        });
+      }
     }
 
     for (const [sev, opts] of byS.entries()) {
-      editor.setDecorations(this.rangeDecTypes.get(sev)!, opts);
+      editor.setDecorations(this.rangeDecTypes.get(sev)!,   opts.range);
+      editor.setDecorations(this.preciseDecTypes.get(sev)!, opts.precise);
     }
   }
 
   clearDecorations(): void {
+    const allTypes = [...this.rangeDecTypes.values(), ...this.preciseDecTypes.values()];
     for (const editor of vscode.window.visibleTextEditors) {
-      for (const dt of this.rangeDecTypes.values()) editor.setDecorations(dt, []);
+      for (const dt of allTypes) editor.setDecorations(dt, []);
     }
   }
 
   dispose(): void {
-    for (const dt of this.rangeDecTypes.values()) dt.dispose();
+    for (const dt of [...this.rangeDecTypes.values(), ...this.preciseDecTypes.values()]) dt.dispose();
     for (const d of this.disposables) d.dispose();
   }
 }
 
-// Resolves a LineRef (plain int or {line, column} object) to a 1-based line number.
-function toLine(val: number | { line: number; column?: number } | string | undefined): number {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+type RawRef = number | { line?: number; column?: number } | undefined;
+
+/** Extracts a 1-based line number from a plain int or {line, column} object. */
+function toLine(val: RawRef): number {
   if (typeof val === 'object' && val !== null && 'line' in val) {
     const n = Number(val.line);
     return n > 0 ? Math.floor(n) : 1;
   }
   const n = Number(val);
   return n > 0 ? Math.floor(n) : 1;
+}
+
+/** Extracts a 0-based column index from a {line, column} object. Returns 0 if unavailable. */
+function toCol(val: RawRef): number {
+  if (typeof val === 'object' && val !== null && 'column' in val) {
+    const n = Number(val.column);
+    return n > 0 ? Math.floor(n) - 1 : 0; // CodeClimate columns are 1-based
+  }
+  return 0;
 }

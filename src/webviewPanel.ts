@@ -65,6 +65,7 @@ export class CodeClimatePanel implements vscode.Disposable {
       files: this.issueManager.getFileInfos(),
       issues: this.issueManager.getAllIssues(),
       config: { showChartLegends },
+      workspacePaths: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
     });
   }
 

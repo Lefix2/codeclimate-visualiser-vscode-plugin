@@ -25,6 +25,8 @@ const COL_COUNT = 7;
 let allIssues = [];
 /** @type {any[]} */
 let allFiles = [];
+/** @type {string[]} */
+let workspacePaths = [];
 
 /**
  * @type {{
@@ -99,6 +101,7 @@ window.addEventListener('message', (event) => {
     allIssues = msg.issues ?? [];
     allFiles  = msg.files  ?? [];
     if (msg.config) config = { ...config, ...msg.config };
+    workspacePaths = msg.workspacePaths ?? [];
     filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
     render();
   } else if (msg.type === 'snippet') {
@@ -455,7 +458,7 @@ function renderTable() {
     tr.appendChild(makeFilterCell(issue.check_name ?? '', 'cell-mono', () => applyQuickFilter(issue.check_name ?? '')));
     tr.appendChild(makeFilterCell(issue.sourceFile  ?? '', 'cell-mono', () => applyQuickFilter(issue.sourceFile  ?? '')));
     const tdFile = makeFilterCell(fname, 'cell-mono', () => applyQuickFilter(fname));
-    tdFile.title = filePath;
+    tdFile.title = displayPath(filePath);
     tr.appendChild(tdFile);
 
     // Line
@@ -726,5 +729,21 @@ function resolveLineRef(ref) {
 }
 
 function basename(p) { return p.slice(p.lastIndexOf('/') + 1); }
+
+/**
+ * Strip the workspace root from an absolute path so we show a tidy relative
+ * path (e.g. "src/utils.rb" instead of "/home/user/project/src/utils.rb").
+ * Falls back to the original string when no workspace root matches.
+ * @param {string} p
+ */
+function displayPath(p) {
+  if (!p) return '';
+  const norm = p.replace(/\\/g, '/');
+  for (const ws of workspacePaths) {
+    const wsNorm = ws.replace(/\\/g, '/').replace(/\/$/, '');
+    if (norm.startsWith(wsNorm + '/')) return norm.slice(wsNorm.length + 1);
+  }
+  return p;
+}
 
 function el(id) { return /** @type {HTMLElement} */(document.getElementById(id)); }
