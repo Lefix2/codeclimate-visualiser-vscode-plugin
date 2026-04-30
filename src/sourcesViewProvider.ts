@@ -6,92 +6,700 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
 
   private view?: vscode.WebviewView;
 
-  constructor(private readonly issueManager: IssueManager) {
+  constructor(
+    private readonly issueManager: IssueManager,
+    private readonly onInit: () => Promise<void>,
+    private readonly onFocusIssue: (id: string) => void,
+    private readonly onOpenFile: (filePath: string, line: number) => Promise<void>,
+  ) {
     issueManager.onChange(() => this.update());
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.onDidReceiveMessage(async (msg: { type: string; uri?: string; command?: string }) => {
-      if (msg.type === 'removeSource' && msg.uri) {
+    webviewView.webview.html = this.buildHtml();
+
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) this.update();
+    });
+
+    webviewView.webview.onDidReceiveMessage(async (msg: {
+      type: string; uri?: string; command?: string; id?: string; path?: string; line?: number;
+    }) => {
+      if (msg.type === 'ready') {
+        this.update();
+      } else if (msg.type === 'removeSource' && msg.uri) {
         this.issueManager.removeFile(msg.uri);
       } else if (msg.type === 'command' && msg.command) {
         await vscode.commands.executeCommand(msg.command);
+      } else if (msg.type === 'focusIssue' && msg.id) {
+        this.onFocusIssue(msg.id);
+      } else if (msg.type === 'openFile' && msg.path) {
+        await this.onOpenFile(msg.path, msg.line ?? 1);
       }
     });
-    this.update();
+
+    this.onInit();
   }
 
   private update(): void {
-    if (!this.view) return;
-    this.view.webview.html = this.buildHtml();
+    if (!this.view?.visible) return;
+    const files = this.issueManager.getFileInfos();
+    const issues = this.issueManager.getAllIssues().map(i => ({
+      id: i.id,
+      severity: i.severity,
+      description: i.description,
+      check_name: i.check_name,
+      sourceFile: i.sourceFile,
+      location: i.location,
+    }));
+    this.view.webview.postMessage({ type: 'update', files, issues });
   }
 
   private buildHtml(): string {
-    const files = this.issueManager.getFileInfos();
     const nonce = getNonce();
-
-    const fileRows = files.length === 0
-      ? '<p class="empty">No reports loaded.</p>'
-      : files.map(f => `
-        <div class="source-item">
-          <span class="source-name" title="${esc(f.uri)}">${esc(f.filename)}<span class="count">&nbsp;${f.issueCount}</span></span>
-          <button class="remove-btn" data-uri="${esc(f.uri)}" title="Remove">×</button>
-        </div>`).join('');
-
-    const clearBtn = files.length > 0
-      ? `<button class="btn btn-secondary" data-cmd="codeclimateVisualiser.clearAll">Clear All</button>`
-      : '';
-
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); }
-    .actions { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #333); }
-    .btn { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 5px 8px; border-radius: 2px; cursor: pointer; font-size: inherit; text-align: left; width: 100%; }
+    html, body {
+      height: 100%; overflow: hidden;
+      margin: 0; padding: 0;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      color: var(--vscode-foreground);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { display: flex; flex-direction: column; }
+
+    /* ── Top action ─────────────────────────── */
+    .actions { flex-shrink: 0; padding: 6px 8px; }
+    .btn {
+      display: block; width: 100%; padding: 4px 10px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none; border-radius: 2px; cursor: pointer;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      text-align: center;
+    }
     .btn:hover { background: var(--vscode-button-hoverBackground); }
-    .btn-secondary { background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ccc); }
-    .btn-secondary:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
-    .section-title { font-size: 0.75em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.5; padding: 8px 8px 2px; }
-    .sources { padding: 2px 0; }
-    .source-item { display: flex; align-items: center; padding: 3px 8px; gap: 4px; }
+
+    /* ── Section layout ─────────────────────── */
+    .section { flex-shrink: 0; }
+    .section-stretch { flex: 1; display: flex; flex-direction: column; min-height: 80px; overflow: hidden; }
+    .section-body { display: none; }
+    .section-body.open { display: block; }
+    .section-body-flex { display: none; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+    .section-body-flex.open { display: flex; }
+
+    /* ── Section header ─────────────────────── */
+    .section-header {
+      display: flex; align-items: center;
+      height: 22px; padding: 0 4px 0 8px;
+      cursor: pointer; user-select: none;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground));
+    }
+    .section-header:hover { background: var(--vscode-list-hoverBackground); }
+    .arrow {
+      width: 16px; height: 16px; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-right: 2px;
+    }
+    .hdr-title { flex: 1; }
+    .hdr-count {
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-radius: 10px; padding: 1px 6px;
+      font-size: 0.82em; font-weight: 400; letter-spacing: 0;
+      min-width: 18px; text-align: center;
+    }
+
+    /* ── Icon buttons ───────────────────────── */
+    .icon-btn {
+      background: none; border: none;
+      color: var(--vscode-foreground);
+      cursor: pointer; padding: 1px 2px;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0; border-radius: 2px; line-height: 0;
+    }
+    .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
+    .hdr-more { opacity: 0.55; margin-left: 2px; }
+    .hdr-more:hover { opacity: 1; }
+
+    /* ── Sources list ───────────────────────── */
+    .source-item { display: flex; align-items: center; height: 22px; padding: 0 8px; gap: 4px; }
     .source-item:hover { background: var(--vscode-list-hoverBackground); }
-    .source-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
-    .count { opacity: 0.55; font-size: 0.88em; font-variant-numeric: tabular-nums; }
-    .remove-btn { background: none; border: none; color: var(--vscode-foreground); cursor: pointer; opacity: 0.35; padding: 0 2px; font-size: 1.1em; flex-shrink: 0; line-height: 1; }
-    .remove-btn:hover { opacity: 1; }
-    .empty { padding: 12px 8px; font-size: 0.85em; opacity: 0.5; font-style: italic; }
+    .close-btn { opacity: 0.25; transition: opacity 0.1s; }
+    .source-item:hover .close-btn { opacity: 0.65; }
+    .source-item:hover .close-btn:hover { opacity: 1; }
+    .source-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .count { opacity: 0.55; font-variant-numeric: tabular-nums; }
+    .load-link {
+      display: flex; align-items: center; height: 22px; padding: 0 8px 0 22px;
+      background: none; border: none; width: 100%; cursor: pointer; text-align: left;
+      font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
+      color: var(--vscode-textLink-foreground, var(--vscode-button-background));
+    }
+    .load-link:hover { background: var(--vscode-list-hoverBackground); }
+
+    /* ── Issues list ────────────────────────── */
+    #issues-list { flex: 1; overflow-y: auto; min-height: 0; }
+    .issue-item {
+      display: flex; align-items: center; height: 22px; gap: 4px;
+      padding: 0 4px 0 22px; cursor: pointer;
+    }
+    .issue-item:hover { background: var(--vscode-list-hoverBackground); }
+    .sev-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; }
+    .issue-desc { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .issue-loc { flex-shrink: 0; opacity: 0.5; font-size: 0.85em; }
+    .focus-btn { opacity: 0; transition: opacity 0.1s; }
+    .issue-item:hover .focus-btn { opacity: 0.5; }
+    .issue-item:hover .focus-btn:hover { opacity: 1; }
+    .more-issues {
+      height: 22px; display: flex; align-items: center; padding: 0 8px 0 22px;
+      opacity: 0.5; font-style: italic; flex-shrink: 0;
+    }
+
+    /* ── File mode items ────────────────────── */
+    .issue-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .check-part { flex-shrink: 0; }
+    .desc-part { color: var(--vscode-descriptionForeground); }
+    .file-mode-item .focus-btn { opacity: 0.35; }
+    .file-mode-item .focus-btn:hover { opacity: 1; }
+
+    /* ── File / folder groups ───────────────── */
+    .file-group-hdr, .tree-node-hdr {
+      display: flex; align-items: center; height: 22px; padding: 0 8px;
+      cursor: pointer; user-select: none;
+    }
+    .file-group-hdr:hover, .tree-node-hdr:hover { background: var(--vscode-list-hoverBackground); }
+    .file-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; flex-shrink: 0; margin-right: 4px;
+    }
+    .file-group-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-group-body { display: none; }
+    .file-group-body.open { display: block; }
+    .file-group-body .file-mode-item { padding: 0 4px 0 28px; }
+
+    /* ── Dropdowns ──────────────────────────── */
+    .dropdown {
+      position: fixed;
+      background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+      border: 1px solid var(--vscode-menu-border, var(--vscode-contrastBorder, rgba(128,128,128,0.3)));
+      border-radius: 3px; padding: 4px 0; z-index: 1000; min-width: 160px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2); display: none;
+    }
+    .dropdown.open { display: block; }
+    .dropdown-item {
+      display: flex; align-items: center; height: 24px; padding: 0 10px; gap: 8px;
+      cursor: pointer; color: var(--vscode-menu-foreground, var(--vscode-foreground));
+      font-size: var(--vscode-font-size); font-family: var(--vscode-font-family); user-select: none;
+    }
+    .dropdown-item:hover {
+      background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+      color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+    }
+    .dropdown-check { width: 14px; text-align: center; font-size: 0.9em; }
+    .dropdown-sep { height: 1px; background: var(--vscode-menu-separatorBackground, rgba(128,128,128,0.2)); margin: 4px 0; }
+
+    /* ── Empty state ────────────────────────── */
+    #empty-msg { padding: 8px; opacity: 0.5; font-style: italic; }
   </style>
 </head>
 <body>
   <div class="actions">
-    <button class="btn" data-cmd="codeclimateVisualiser.loadFromConfig">Load from Config</button>
-    <button class="btn btn-secondary" data-cmd="codeclimateVisualiser.openFiles">Open Report(s)…</button>
-    ${clearBtn}
+    <button class="btn" id="btn-view">Open View</button>
   </div>
-  ${files.length > 0 ? '<div class="section-title">Loaded reports</div>' : ''}
-  <div class="sources">${fileRows}</div>
+
+  <div id="sources-section" class="section" style="display:none">
+    <div class="section-header expanded" id="sources-header">
+      <span class="arrow" id="sources-arrow"></span>
+      <span class="hdr-title">Reports</span>
+      <span class="hdr-count" id="sources-count"></span>
+    </div>
+    <div class="section-body open" id="sources-body">
+      <div id="sources-list"></div>
+      <button class="load-link" id="btn-open">+ Load report…</button>
+    </div>
+  </div>
+
+  <div id="issues-section" class="section section-stretch" style="display:none">
+    <div class="section-header expanded" id="issues-header">
+      <span class="arrow" id="issues-arrow"></span>
+      <span class="hdr-title">Issues</span>
+      <span class="hdr-count" id="issues-count"></span>
+      <button class="icon-btn hdr-more" id="btn-sort" title="Sort"></button>
+      <button class="icon-btn hdr-more" id="btn-more" title="View options"></button>
+    </div>
+    <div class="section-body-flex open" id="issues-body">
+      <div id="issues-list"></div>
+    </div>
+  </div>
+
+  <!-- Sort dropdown -->
+  <div class="dropdown" id="sort-dropdown">
+    <div class="dropdown-item" id="menu-sort-severity"><span class="dropdown-check" id="check-sort-severity"></span><span>Sort by Severity</span></div>
+    <div class="dropdown-item" id="menu-sort-checkname"><span class="dropdown-check" id="check-sort-checkname"></span><span>Sort by Check Name</span></div>
+    <div class="dropdown-item" id="menu-sort-filename"><span class="dropdown-check" id="check-sort-filename"></span><span>Sort by File Name</span></div>
+  </div>
+
+  <!-- Group/view dropdown -->
+  <div class="dropdown" id="group-dropdown">
+    <div class="dropdown-item" id="menu-by-issue"><span class="dropdown-check" id="check-issue"></span><span>View by issue</span></div>
+    <div class="dropdown-item" id="menu-by-file"><span class="dropdown-check" id="check-file"></span><span>View by file</span></div>
+    <div class="dropdown-item" id="menu-by-tree"><span class="dropdown-check" id="check-tree"></span><span>Tree view</span></div>
+  </div>
+
+  <div id="empty-msg">No reports loaded.</div>
+
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    document.querySelectorAll('[data-cmd]').forEach(btn => {
-      btn.addEventListener('click', () => vscode.postMessage({ type: 'command', command: btn.dataset.cmd }));
+    const SEV = { blocker:'#7b1fa2', critical:'#e53935', major:'#f4511e', minor:'#f9a825', info:'#78909c' };
+    const SEV_ORDER = ['blocker', 'critical', 'major', 'minor', 'info'];
+    let groupBy = 'file';
+    let lastIssues = [];
+    let sortBy  = 'severity';  // 'severity' | 'checkname' | 'filename'
+    let sortDir = 'asc';       // 'asc' | 'desc'
+
+    // ── SVG icons ────────────────────────────────────────────────────────
+    const ICONS = {
+      chevronRight: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="5.5,3 10.5,8 5.5,13"/></svg>',
+      chevronDown:  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,5.5 8,10.5 13,5.5"/></svg>',
+      close:        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>',
+      focusTable:   '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="6" y1="3" x2="6" y2="13"/></svg>',
+      sort:         '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="10" y2="4"/><line x1="2" y1="8" x2="7" y2="8"/><line x1="2" y1="12" x2="5" y2="12"/><polyline points="12,2 12,14"/><polyline points="9,11 12,14 15,11"/></svg>',
+      ellipsis:     '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/></svg>',
+      folder:       '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4C1.5 3.45 1.95 3 2.5 3H5.5L7 4.5H11.5C12.05 4.5 12.5 4.95 12.5 5.5V10.5C12.5 11.05 12.05 11.5 11.5 11.5H2.5C1.95 11.5 1.5 11.05 1.5 10.5V4z"/></svg>',
+    };
+
+    document.getElementById('btn-sort').innerHTML = ICONS.sort;
+    document.getElementById('btn-more').innerHTML  = ICONS.ellipsis;
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+    function maxSev(issues) {
+      for (const sev of SEV_ORDER) {
+        if (issues.some(i => i.severity === sev)) return sev;
+      }
+      return 'info';
+    }
+    function fileIcon(color) {
+      return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="' + color +
+        '" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M8 1H2.5C1.95 1 1.5 1.45 1.5 2v10c0 .55.45 1 1 1h8c.55 0 1-.45 1-1V5L8 1z"/>' +
+        '<polyline points="8,1 8,5 11.5,5"/></svg>';
+    }
+    function extractLine(raw) {
+      if (!raw && raw !== 0) return undefined;
+      return typeof raw === 'object' ? raw.line : raw;
+    }
+    function getIssueLine(issue) {
+      const raw = issue.location && (
+        (issue.location.positions && issue.location.positions.begin &&
+          issue.location.positions.begin.line) ||
+        (issue.location.lines && issue.location.lines.begin)
+      );
+      return extractLine(raw) || 0;
+    }
+
+    // ── Sort logic ───────────────────────────────────────────────────────
+    function sevRank(s) {
+      const r = SEV_ORDER.indexOf(s);
+      return r < 0 ? SEV_ORDER.length : r;
+    }
+    function applySort(issues) {
+      if (!sortBy) return issues;
+      const dir = sortDir === 'asc' ? 1 : -1;
+      return [...issues].sort((a, b) => {
+        if (sortBy === 'severity') return dir * (sevRank(a.severity) - sevRank(b.severity));
+        if (sortBy === 'checkname') return dir * (a.check_name || '').localeCompare(b.check_name || '');
+        if (sortBy === 'filename') {
+          const fa = (a.location && a.location.path) || '';
+          const fb = (b.location && b.location.path) || '';
+          return dir * fa.localeCompare(fb);
+        }
+        return 0;
+      });
+    }
+    function updateSortMenu() {
+      const dir = sortDir === 'asc' ? ' ↑' : ' ↓';
+      document.getElementById('check-sort-severity').textContent  = sortBy === 'severity'  ? dir : '';
+      document.getElementById('check-sort-checkname').textContent = sortBy === 'checkname' ? dir : '';
+      document.getElementById('check-sort-filename').textContent  = sortBy === 'filename'  ? dir : '';
+    }
+    updateSortMenu();
+
+    // ── Button handlers ──────────────────────────────────────────────────
+    document.getElementById('btn-view').addEventListener('click', () =>
+      vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.openView' }));
+    document.getElementById('btn-open').addEventListener('click', e => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.openFiles' });
     });
-    document.querySelectorAll('.remove-btn[data-uri]').forEach(btn => {
-      btn.addEventListener('click', () => vscode.postMessage({ type: 'removeSource', uri: btn.dataset.uri }));
+
+    // ── Sort dropdown ────────────────────────────────────────────────────
+    const btnSort    = document.getElementById('btn-sort');
+    const sortDropdown = document.getElementById('sort-dropdown');
+
+    btnSort.addEventListener('click', e => {
+      e.stopPropagation();
+      const rect = btnSort.getBoundingClientRect();
+      sortDropdown.style.left = Math.max(0, rect.right - 180) + 'px';
+      sortDropdown.style.top  = (rect.bottom + 2) + 'px';
+      sortDropdown.classList.toggle('open');
+      document.getElementById('group-dropdown').classList.remove('open');
     });
+
+    function setSortBy(key) {
+      if (sortBy === key) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortBy  = key;
+        sortDir = 'asc';
+      }
+      updateSortMenu();
+      sortDropdown.classList.remove('open');
+      renderIssues(lastIssues);
+    }
+    document.getElementById('menu-sort-severity').addEventListener('click',  () => setSortBy('severity'));
+    document.getElementById('menu-sort-checkname').addEventListener('click', () => setSortBy('checkname'));
+    document.getElementById('menu-sort-filename').addEventListener('click',  () => setSortBy('filename'));
+
+    // ── Group/view dropdown ──────────────────────────────────────────────
+    const btnMore  = document.getElementById('btn-more');
+    const dropdown = document.getElementById('group-dropdown');
+
+    function updateGroupMenu() {
+      document.getElementById('check-issue').textContent = groupBy === 'issue' ? '✓' : '';
+      document.getElementById('check-file').textContent  = groupBy === 'file'  ? '✓' : '';
+      document.getElementById('check-tree').textContent  = groupBy === 'tree'  ? '✓' : '';
+    }
+    updateGroupMenu();
+
+    btnMore.addEventListener('click', e => {
+      e.stopPropagation();
+      const rect = btnMore.getBoundingClientRect();
+      dropdown.style.left = Math.max(0, rect.right - 164) + 'px';
+      dropdown.style.top  = (rect.bottom + 2) + 'px';
+      dropdown.classList.toggle('open');
+      sortDropdown.classList.remove('open');
+    });
+    document.addEventListener('click', () => {
+      dropdown.classList.remove('open');
+      sortDropdown.classList.remove('open');
+    });
+    document.getElementById('menu-by-issue').addEventListener('click', () => {
+      groupBy = 'issue'; updateGroupMenu(); dropdown.classList.remove('open'); renderIssues(lastIssues);
+    });
+    document.getElementById('menu-by-file').addEventListener('click', () => {
+      groupBy = 'file'; updateGroupMenu(); dropdown.classList.remove('open'); renderIssues(lastIssues);
+    });
+    document.getElementById('menu-by-tree').addEventListener('click', () => {
+      groupBy = 'tree'; updateGroupMenu(); dropdown.classList.remove('open'); renderIssues(lastIssues);
+    });
+
+    // ── Collapsible sections ─────────────────────────────────────────────
+    function wireToggle(headerId, bodyId, arrowId) {
+      const hdr   = document.getElementById(headerId);
+      const body  = document.getElementById(bodyId);
+      const arrow = document.getElementById(arrowId);
+      if (arrow) arrow.innerHTML = ICONS.chevronDown;
+      hdr.addEventListener('click', () => {
+        const open = hdr.classList.toggle('expanded');
+        body.classList.toggle('open', open);
+        if (arrow) arrow.innerHTML = open ? ICONS.chevronDown : ICONS.chevronRight;
+      });
+    }
+    wireToggle('sources-header', 'sources-body', 'sources-arrow');
+    wireToggle('issues-header',  'issues-body',  'issues-arrow');
+
+    // ── Data updates ─────────────────────────────────────────────────────
+    window.addEventListener('message', event => {
+      const msg = event.data;
+      if (msg.type === 'update') {
+        renderSources(msg.files  || []);
+        renderIssues (msg.issues || []);
+      }
+    });
+
+    // ── Sources ──────────────────────────────────────────────────────────
+    function renderSources(files) {
+      const section = document.getElementById('sources-section');
+      const list    = document.getElementById('sources-list');
+      const empty   = document.getElementById('empty-msg');
+      const count   = document.getElementById('sources-count');
+      section.style.display = files.length ? '' : 'none';
+      empty.style.display   = files.length ? 'none' : '';
+      count.textContent = files.length;
+      list.innerHTML = '';
+      for (const f of files) {
+        const item = document.createElement('div');
+        item.className = 'source-item';
+        const rm = document.createElement('button');
+        rm.className = 'icon-btn close-btn'; rm.title = 'Remove'; rm.innerHTML = ICONS.close;
+        rm.addEventListener('click', e => {
+          e.stopPropagation();
+          vscode.postMessage({ type: 'removeSource', uri: f.uri });
+        });
+        const name = document.createElement('span');
+        name.className = 'source-name'; name.title = f.uri; name.textContent = f.filename;
+        const cnt = document.createElement('span');
+        cnt.className = 'count'; cnt.textContent = f.issueCount;
+        item.appendChild(rm); item.appendChild(name); item.appendChild(cnt);
+        list.appendChild(item);
+      }
+    }
+
+    // ── Issue item builders ──────────────────────────────────────────────
+    function makeIssueItem(issue, showFile) {
+      const p      = (issue.location && issue.location.path) || '';
+      const file   = p.split('/').pop() || '';
+      const lineNum = getIssueLine(issue);
+
+      const item = document.createElement('div');
+      item.className = 'issue-item';
+      item.title = issue.description || '';
+
+      const dot = document.createElement('span');
+      dot.className = 'sev-dot';
+      dot.style.background = SEV[issue.severity] || SEV.info;
+
+      const desc = document.createElement('span');
+      desc.className = 'issue-desc';
+      desc.textContent = issue.check_name || issue.description || '';
+
+      const loc = document.createElement('span');
+      loc.className = 'issue-loc';
+      loc.textContent = (showFile ? file : '') + (lineNum > 0 ? ':' + lineNum : '');
+
+      const focusBtn = document.createElement('button');
+      focusBtn.className = 'icon-btn focus-btn'; focusBtn.title = 'Focus in table';
+      focusBtn.innerHTML = ICONS.focusTable;
+      focusBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'focusIssue', id: issue.id });
+      });
+
+      item.appendChild(dot); item.appendChild(desc); item.appendChild(loc); item.appendChild(focusBtn);
+      item.addEventListener('click', () => {
+        if (p) vscode.postMessage({ type: 'openFile', path: p, line: lineNum || 1 });
+      });
+      return item;
+    }
+
+    function makeFileIssueItem(issue) {
+      const p       = (issue.location && issue.location.path) || '';
+      const lineNum = getIssueLine(issue);
+
+      const item = document.createElement('div');
+      item.className = 'issue-item file-mode-item';
+      item.title = p + (lineNum > 0 ? '\\nLine ' + lineNum : '');
+
+      const dot = document.createElement('span');
+      dot.className = 'sev-dot';
+      dot.style.background = SEV[issue.severity] || SEV.info;
+
+      const main = document.createElement('span');
+      main.className = 'issue-main';
+
+      const checkPart = document.createElement('span');
+      checkPart.className = 'check-part';
+      checkPart.textContent = issue.check_name || '';
+
+      const descPart = document.createElement('span');
+      descPart.className = 'desc-part';
+      if (issue.description) descPart.textContent = ' – ' + issue.description;
+
+      main.appendChild(checkPart); main.appendChild(descPart);
+
+      const focusBtn = document.createElement('button');
+      focusBtn.className = 'icon-btn focus-btn'; focusBtn.title = 'Focus in table';
+      focusBtn.innerHTML = ICONS.focusTable;
+      focusBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'focusIssue', id: issue.id });
+      });
+
+      item.appendChild(dot); item.appendChild(main); item.appendChild(focusBtn);
+      item.addEventListener('click', () => {
+        if (p) vscode.postMessage({ type: 'openFile', path: p, line: lineNum || 1 });
+      });
+      return item;
+    }
+
+    // ── Render ───────────────────────────────────────────────────────────
+    function renderIssues(issues) {
+      lastIssues = issues;
+      const section  = document.getElementById('issues-section');
+      const countEl  = document.getElementById('issues-count');
+      const list     = document.getElementById('issues-list');
+      if (!issues.length) { section.style.display = 'none'; list.innerHTML = ''; return; }
+      section.style.display = '';
+      countEl.textContent = issues.length;
+      const sorted = applySort(issues);
+      list.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      if      (groupBy === 'file') renderByFile(sorted, frag);
+      else if (groupBy === 'tree') renderTree(sorted, frag);
+      else                         renderFlat(sorted, frag);
+      list.appendChild(frag);
+    }
+
+    function renderFlat(issues, frag) {
+      const shown = issues.slice(0, 500);
+      for (const issue of shown) frag.appendChild(makeIssueItem(issue, true));
+      if (issues.length > 500) appendMore(frag, issues.length - 500);
+    }
+
+    function renderByFile(issues, frag) {
+      const groupMap = new Map();
+      for (const issue of issues) {
+        const p = (issue.location && issue.location.path) || '';
+        if (!groupMap.has(p)) groupMap.set(p, []);
+        groupMap.get(p).push(issue);
+      }
+      // Groups always alphabetical by path
+      const groups = [...groupMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      let total = 0;
+      for (const [path, groupIssues] of groups) {
+        if (total >= 500) break;
+        const file   = path.split('/').pop() || path || '(unknown)';
+        // Issues within each file: apply active sort
+        const sorted = applySort(groupIssues);
+
+        const groupEl = document.createElement('div');
+        const hdr = document.createElement('div');
+        hdr.className = 'file-group-hdr';
+        const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.innerHTML = ICONS.chevronRight;
+        const icon  = document.createElement('span'); icon.className  = 'file-icon';
+        icon.innerHTML = fileIcon(SEV[maxSev(groupIssues)] || SEV.info);
+        const name = document.createElement('span'); name.className = 'file-group-name'; name.textContent = file; name.title = path;
+        const cnt  = document.createElement('span'); cnt.className  = 'count'; cnt.textContent = groupIssues.length;
+        hdr.appendChild(arrow); hdr.appendChild(icon); hdr.appendChild(name); hdr.appendChild(cnt);
+
+        const body = document.createElement('div'); body.className = 'file-group-body';
+        hdr.addEventListener('click', () => {
+          const exp = hdr.classList.toggle('expanded');
+          body.classList.toggle('open', exp);
+          arrow.innerHTML = exp ? ICONS.chevronDown : ICONS.chevronRight;
+        });
+
+        for (const issue of sorted) {
+          if (total >= 500) break;
+          body.appendChild(makeFileIssueItem(issue));
+          total++;
+        }
+        groupEl.appendChild(hdr); groupEl.appendChild(body);
+        frag.appendChild(groupEl);
+      }
+      if (issues.length > 500) appendMore(frag, issues.length - 500);
+    }
+
+    // ── Tree view ────────────────────────────────────────────────────────
+    function buildTree(issues) {
+      const root = { name: '', path: '', isFile: false, issues: [], children: new Map(), _c: -1 };
+      for (const issue of issues) {
+        const p     = (issue.location && issue.location.path) || '';
+        const parts = p ? p.split('/').filter(Boolean) : [];
+        let node = root;
+        for (let i = 0; i < parts.length - 1; i++) {
+          const seg = parts[i];
+          if (!node.children.has(seg)) {
+            node.children.set(seg, { name: seg, path: parts.slice(0, i + 1).join('/'), isFile: false, issues: [], children: new Map(), _c: -1 });
+          }
+          node = node.children.get(seg);
+        }
+        const leaf = parts.length > 0 ? parts[parts.length - 1] : '(no path)';
+        if (!node.children.has(leaf)) {
+          node.children.set(leaf, { name: leaf, path: p, isFile: true, issues: [], children: new Map(), _c: -1 });
+        }
+        node.children.get(leaf).issues.push(issue);
+      }
+      return root;
+    }
+    function countNode(node) {
+      if (node._c >= 0) return node._c;
+      let c = node.issues.length;
+      for (const ch of node.children.values()) c += countNode(ch);
+      node._c = c; return c;
+    }
+    function sortedChildren(node) {
+      const dirs  = [...node.children.values()].filter(n => !n.isFile).sort((a, b) => a.name.localeCompare(b.name));
+      const files = [...node.children.values()].filter(n =>  n.isFile).sort((a, b) => a.name.localeCompare(b.name));
+      return [...dirs, ...files];
+    }
+
+    function renderTree(issues, frag) {
+      const root = buildTree(issues);
+      let total = 0;
+
+      function renderNode(node, depth, container) {
+        if (total >= 500) return;
+        const c = countNode(node);
+        if (c === 0) return;
+        const indent = 8 + depth * 14;
+
+        const groupEl = document.createElement('div');
+        const hdr   = document.createElement('div');
+        hdr.className = 'tree-node-hdr';
+        hdr.style.paddingLeft = indent + 'px';
+
+        const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.innerHTML = ICONS.chevronRight;
+        const icon  = document.createElement('span'); icon.className  = 'file-icon';
+        icon.innerHTML = node.isFile ? fileIcon(SEV[maxSev(node.issues)] || SEV.info) : ICONS.folder;
+        const name  = document.createElement('span'); name.className  = 'file-group-name';
+        name.textContent = node.isFile ? node.name : node.name + '/';
+        name.title = node.path;
+        const cnt   = document.createElement('span'); cnt.className   = 'count'; cnt.textContent = c;
+        hdr.appendChild(arrow); hdr.appendChild(icon); hdr.appendChild(name); hdr.appendChild(cnt);
+
+        const body = document.createElement('div'); body.className = 'file-group-body';
+        hdr.addEventListener('click', () => {
+          const exp = hdr.classList.toggle('expanded');
+          body.classList.toggle('open', exp);
+          arrow.innerHTML = exp ? ICONS.chevronDown : ICONS.chevronRight;
+        });
+
+        if (node.isFile) {
+          const sorted = applySort(node.issues);
+          for (const issue of sorted) {
+            if (total >= 500) break;
+            const el = makeFileIssueItem(issue);
+            el.style.paddingLeft = (indent + 16) + 'px';
+            el.style.paddingRight = '4px';
+            body.appendChild(el);
+            total++;
+          }
+        } else {
+          for (const child of sortedChildren(node)) renderNode(child, depth + 1, body);
+        }
+
+        groupEl.appendChild(hdr); groupEl.appendChild(body);
+        container.appendChild(groupEl);
+      }
+
+      for (const child of sortedChildren(root)) renderNode(child, 0, frag);
+      if (issues.length > 500) appendMore(frag, issues.length - 500);
+    }
+
+    function appendMore(frag, n) {
+      const more = document.createElement('div');
+      more.className = 'more-issues';
+      more.textContent = '+ ' + n + ' more…';
+      frag.appendChild(more);
+    }
+
+    vscode.postMessage({ type: 'ready' });
   </script>
 </body>
 </html>`;
   }
-}
-
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function getNonce(): string {

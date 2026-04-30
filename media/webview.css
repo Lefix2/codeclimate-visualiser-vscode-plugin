@@ -324,6 +324,14 @@ h3 {
 .row-sev-minor    td:first-child { border-left: 3px solid #f9a825; }
 .row-sev-info     td:first-child { border-left: 3px solid #78909c; }
 
+/* ── Focus flash ─────────────────────────────────────────────────────────────── */
+
+@keyframes row-flash-anim {
+  0%, 100% { background: transparent; }
+  25%  { background: var(--vscode-editor-findMatchHighlightBackground, rgba(255,200,0,0.35)); }
+}
+.row-flash { animation: row-flash-anim 1.6s ease-out; }
+
 /* ── Expanded row ────────────────────────────────────────────────────────────── */
 
 .row-expanded {

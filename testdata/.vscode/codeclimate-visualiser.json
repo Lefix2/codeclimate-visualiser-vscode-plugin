@@ -2,13 +2,13 @@
   "customColumns": [
     {
       "name": "outil",
-      "index": 3,
-      "showChart": true,
+      "index": 0,
+      "showChart": false,
       "showFilter": true
     },
     {
       "name": "sous-système",
-      "index": 4,
+      "index": 2,
       "showChart": true,
       "showFilter": true,
       "fromField": "location.path",
