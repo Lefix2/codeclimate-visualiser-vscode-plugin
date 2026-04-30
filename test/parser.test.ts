@@ -185,27 +185,20 @@ describe('parseCodeClimateFile', () => {
   });
 
   describe('real test data', () => {
-    it('parses NDJSON testdata file (codeparser-dispatch.json)', () => {
-      const content = fs.readFileSync(
-        path.join(TESTDATA_DIR, 'codeparser-dispatch.json'),
-        'utf-8'
-      );
-      const issues = parseCodeClimateFile(content);
-      assert.ok(issues.length > 0, 'should parse at least one issue');
-      for (const issue of issues) {
-        assert.strictEqual(issue.type, 'issue');
-        assert.strictEqual(typeof issue.check_name, 'string');
-        assert.ok(issue.location?.path, 'each issue should have a path');
-      }
-    });
-
-    it('parses NDJSON testdata file (codeparser-gesmaj.json)', () => {
-      const content = fs.readFileSync(
-        path.join(TESTDATA_DIR, 'codeparser-gesmaj.json'),
-        'utf-8'
-      );
-      const issues = parseCodeClimateFile(content);
-      assert.ok(issues.length > 0, 'should parse at least one issue');
-    });
+    for (const filename of ['eslint-report.json', 'codeparser-report.json', 'semgrep-report.json']) {
+      it(`parses NDJSON testdata file (${filename})`, () => {
+        const content = fs.readFileSync(
+          path.join(TESTDATA_DIR, filename),
+          'utf-8'
+        );
+        const issues = parseCodeClimateFile(content);
+        assert.ok(issues.length > 0, 'should parse at least one issue');
+        for (const issue of issues) {
+          assert.strictEqual(issue.type, 'issue');
+          assert.strictEqual(typeof issue.check_name, 'string');
+          assert.ok(issue.location?.path, 'each issue should have a path');
+        }
+      });
+    }
   });
 });
