@@ -181,6 +181,50 @@ describe('IssueManager', () => {
     });
   });
 
+  describe('customColumns', () => {
+    it('stores custom columns set via setCustomColumns', () => {
+      const manager = new IssueManager();
+      manager.setCustomColumns([{ name: 'tool', index: 3 }]);
+      assert.deepStrictEqual(manager.getCustomColumns(), [{ name: 'tool', index: 3 }]);
+    });
+
+    it('fires onChange when custom columns change', (done) => {
+      const manager = new IssueManager();
+      manager.onChange(() => done());
+      manager.setCustomColumns([{ name: 'env', index: 2 }]);
+    });
+
+    it('replaces previous custom columns', () => {
+      const manager = new IssueManager();
+      manager.setCustomColumns([{ name: 'a', index: 0 }]);
+      manager.setCustomColumns([{ name: 'b', index: 1 }, { name: 'c', index: 2 }]);
+      assert.strictEqual(manager.getCustomColumns().length, 2);
+      assert.strictEqual(manager.getCustomColumns()[0].name, 'b');
+    });
+
+    it('attaches column values to loaded issues', () => {
+      const p = writeReport('colvals.json', makeIssues(2));
+      const manager = new IssueManager();
+      manager.loadFile(makeUri(p), { tool: 'eslint', env: 'ci' });
+
+      const issues = manager.getAllIssues();
+      assert.strictEqual(issues[0].customColumns?.['tool'], 'eslint');
+      assert.strictEqual(issues[0].customColumns?.['env'], 'ci');
+    });
+
+    it('column values are independent per file', () => {
+      const p1 = writeReport('col-a.json', makeIssues(1));
+      const p2 = writeReport('col-b.json', makeIssues(1));
+      const manager = new IssueManager();
+      manager.loadFile(makeUri(p1), { tool: 'eslint' });
+      manager.loadFile(makeUri(p2), { tool: 'semgrep' });
+
+      const issues = manager.getAllIssues();
+      const tools = issues.map((i) => i.customColumns?.['tool']).sort();
+      assert.deepStrictEqual(tools, ['eslint', 'semgrep']);
+    });
+  });
+
   describe('getIssuesForRelativePath', () => {
     it('returns issues matching an exact relative path', () => {
       const issues = [

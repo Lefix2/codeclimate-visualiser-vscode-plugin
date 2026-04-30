@@ -56,25 +56,62 @@ function getRawPatterns(config: ProjectConfig | null): (string | PatternEntry)[]
     : vscode.workspace.getConfiguration('codeclimateVisualiser').get<string[]>('reportPatterns', []);
 }
 
-/** Resolve configured patterns → resolved file entries with column values. */
-async function findConfiguredFiles(config: ProjectConfig | null): Promise<ResolvedFile[]> {
-  const rawPatterns = getRawPatterns(config);
+type PatternErrorKind = 'invalidRegex' | 'fileNotFound' | 'noFilesMatched';
 
-  const results: ResolvedFile[] = [];
+interface PatternError {
+  kind: PatternErrorKind;
+  pattern: string;
+  detail?: string;
+}
+
+interface FindResult {
+  entries: ResolvedFile[];
+  errors: PatternError[];
+}
+
+/** Resolve configured patterns → resolved file entries with column values, plus per-pattern errors. */
+async function findConfiguredFiles(config: ProjectConfig | null): Promise<FindResult> {
+  const rawPatterns = getRawPatterns(config);
+  const entries: ResolvedFile[] = [];
+  const errors: PatternError[] = [];
+
   for (const raw of rawPatterns) {
     const entry: PatternEntry = typeof raw === 'string' ? { glob: raw } : raw;
+
+    if (entry.regex) {
+      try {
+        new RegExp(entry.regex);
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        log(`Invalid regex "${entry.regex}" in pattern "${entry.glob}": ${detail}`);
+        errors.push({ kind: 'invalidRegex', pattern: entry.glob, detail });
+        continue;
+      }
+    }
+
     let uris: vscode.Uri[];
     if (path.isAbsolute(entry.glob)) {
+      if (!fs.existsSync(entry.glob)) {
+        log(`File not found: ${entry.glob}`);
+        errors.push({ kind: 'fileNotFound', pattern: entry.glob });
+        continue;
+      }
       uris = [vscode.Uri.file(entry.glob)];
     } else {
       uris = await vscode.workspace.findFiles(entry.glob);
+      if (uris.length === 0) {
+        log(`Pattern "${entry.glob}" matched no files`);
+        errors.push({ kind: 'noFilesMatched', pattern: entry.glob });
+        continue;
+      }
     }
+
     log(`Pattern "${entry.glob}" matched ${uris.length} file(s)`);
     for (const uri of uris) {
-      results.push({ uri, columnValues: resolveColumnValues(entry, uri.fsPath) });
+      entries.push({ uri, columnValues: resolveColumnValues(entry, uri.fsPath) });
     }
   }
-  return results;
+  return { entries, errors };
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -101,7 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!issueManager.isEmpty) return;
     const projectConfig = await readProjectConfig();
     issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
-    const entries = await findConfiguredFiles(projectConfig);
+    const { entries } = await findConfiguredFiles(projectConfig);
     await loadFromEntries(entries);
   }
 
@@ -188,19 +225,25 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      const entries = await findConfiguredFiles(projectConfig);
-      if (entries.length === 0) {
-        vscode.window.showWarningMessage(
-          'No files matched the configured patterns. Check your glob patterns and verify the files exist.',
-        );
-        return;
+      const { entries, errors } = await findConfiguredFiles(projectConfig);
+      for (const err of errors) {
+        if (err.kind === 'invalidRegex') {
+          vscode.window.showErrorMessage(
+            `Invalid regex in pattern "${err.pattern}": ${err.detail ?? 'syntax error'}`,
+          );
+        } else if (err.kind === 'fileNotFound') {
+          vscode.window.showWarningMessage(`File not found: ${err.pattern}`);
+        } else {
+          vscode.window.showWarningMessage(
+            `No files matched pattern "${err.pattern}". Check the glob and verify the files exist.`,
+          );
+        }
       }
+      if (entries.length === 0) return;
       const loaded = await loadFromEntries(entries);
       if (loaded > 0) {
         panel.show();
         vscode.window.showInformationMessage(`Reloaded ${loaded} report${loaded !== 1 ? 's' : ''}.`);
-      } else {
-        vscode.window.showWarningMessage('Patterns matched files but none could be loaded. Check the Output channel for details.');
       }
     }),
   );
