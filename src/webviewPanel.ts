@@ -55,16 +55,29 @@ export class CodeClimatePanel implements vscode.Disposable {
     this.updateWebview();
   }
 
+  focusIssue(issueId: string): void {
+    this.panel?.webview.postMessage({ type: 'focusIssue', issueId });
+  }
+
   private updateWebview(): void {
     if (!this.panel) return;
-    const showChartLegends = vscode.workspace
-      .getConfiguration('codeclimateVisualiser')
-      .get<boolean>('showChartLegends', false);
+    const cfg = vscode.workspace.getConfiguration('codeclimateVisualiser');
     this.panel.webview.postMessage({
       type: 'updateIssues',
       files: this.issueManager.getFileInfos(),
       issues: this.issueManager.getAllIssues(),
-      config: { showChartLegends },
+      config: {
+        showChartLegends:    cfg.get<boolean>('showChartLegends',    false),
+        showSeverityFilter:  cfg.get<boolean>('showSeverityFilter',  true),
+        showCategoryFilter:  cfg.get<boolean>('showCategoryFilter',  true),
+        showCheckNameFilter: cfg.get<boolean>('showCheckNameFilter', true),
+        showSeverityChart:   cfg.get<boolean>('showSeverityChart',   true),
+        showCategoryChart:   cfg.get<boolean>('showCategoryChart',   true),
+        showCheckNameChart:  cfg.get<boolean>('showCheckNameChart',  true),
+        showSourceChart:     cfg.get<boolean>('showSourceChart',     true),
+        showFileChart:       cfg.get<boolean>('showFileChart',       true),
+        customColumns:       this.issueManager.getCustomColumns(),
+      },
     });
   }
 
@@ -89,7 +102,7 @@ export class CodeClimatePanel implements vscode.Disposable {
     const editor = await vscode.window.showTextDocument(doc, {
       preserveFocus: false,
       preview: false,
-      viewColumn: vscode.ViewColumn.Beside,
+      viewColumn: vscode.ViewColumn.Active,
     });
     const pos = new vscode.Position(Math.max(0, line - 1), 0);
     editor.selection = new vscode.Selection(pos, pos);
@@ -133,11 +146,6 @@ export class CodeClimatePanel implements vscode.Disposable {
 </head>
 <body>
   <div id="app">
-    <div id="header">
-      <h1>&#9673; CodeClimate Visualiser</h1>
-      <div id="file-chips"></div>
-    </div>
-
     <div id="empty-state">
       <p>No CodeClimate report loaded.</p>
       <p>Run <strong>CodeClimate: Open Report(s)</strong> from the command palette,<br>
@@ -146,15 +154,18 @@ export class CodeClimatePanel implements vscode.Disposable {
 
     <div id="main-content" style="display:none">
       <div id="charts-row">
-        <div class="chart-card"><h3>By Severity</h3><canvas id="chart-severity"></canvas></div>
-        <div class="chart-card"><h3>By Category</h3><canvas id="chart-category"></canvas></div>
-        <div class="chart-card"><h3>Top Check Names</h3><canvas id="chart-checkname"></canvas></div>
-        <div class="chart-card"><h3>By Source</h3><canvas id="chart-source"></canvas></div>
-        <div class="chart-card"><h3>Top Files</h3><canvas id="chart-file"></canvas></div>
+        <div class="chart-card" id="card-severity"><h3>By Severity</h3><canvas id="chart-severity"></canvas></div>
+        <div class="chart-card" id="card-category"><h3>By Category</h3><canvas id="chart-category"></canvas></div>
+        <div class="chart-card" id="card-checkname"><h3>Top Check Names</h3><canvas id="chart-checkname"></canvas></div>
+        <div class="chart-card" id="card-source"><h3>By Source</h3><canvas id="chart-source"></canvas></div>
+        <div class="chart-card" id="card-file"><h3>Top Files</h3><canvas id="chart-file"></canvas></div>
       </div>
 
       <div id="filters">
         <div id="filter-severity"></div>
+        <div id="filter-categories"></div>
+        <div id="filter-checknames"></div>
+        <div id="filter-custom"></div>
       </div>
       <div id="search-row">
         <input type="text" id="filter-search" placeholder="Filter by description, file, check name, category… use ; to AND terms">
@@ -165,17 +176,7 @@ export class CodeClimatePanel implements vscode.Disposable {
 
       <div id="table-container">
         <table id="issues-table">
-          <thead>
-            <tr>
-              <th data-col="severity">Severity</th>
-              <th data-col="categories">Category</th>
-              <th data-col="check_name">Check Name</th>
-              <th data-col="sourceFile">Source</th>
-              <th data-col="file">File</th>
-              <th data-col="line">Line</th>
-              <th data-col="description">Description</th>
-            </tr>
-          </thead>
+          <thead id="issues-thead"></thead>
           <tbody id="issues-tbody"></tbody>
         </table>
         <div id="table-footer"></div>

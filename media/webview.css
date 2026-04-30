@@ -16,44 +16,11 @@ body {
   line-height: 1.4;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────────── */
-
-#header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-
-h1 {
-  font-size: 1.25em;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
 h3 {
   font-size: 0.9em;
   font-weight: 600;
   text-align: center;
   margin-bottom: 6px;
-}
-
-#file-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.file-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--vscode-badge-background, #4d4d4d);
-  color: var(--vscode-badge-foreground, #fff);
-  border-radius: 12px;
-  padding: 2px 10px 2px 12px;
-  font-size: 0.82em;
 }
 
 .chip-remove {
@@ -91,7 +58,9 @@ h3 {
   display: flex;
   gap: 12px;
   margin-bottom: 14px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 .chart-card {
@@ -137,11 +106,19 @@ h3 {
 }
 
 #filter-severity,
-#filter-sourcefile {
+#filter-sourcefile,
+.filter-group {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+#filter-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
 }
 
 .filter-checkbox {
@@ -237,28 +214,15 @@ h3 {
   /* no cursor / hover on td — only on .filter-text span */
 }
 
-/* Per-column constraints */
-#issues-table tbody td:nth-child(1),
-#issues-table thead th:nth-child(1) { white-space: nowrap; }          /* severity */
-
-#issues-table tbody td:nth-child(2),
-#issues-table thead th:nth-child(2) { min-width: 50px; max-width: 160px; } /* category */
-
-/* cols 3-5: td clips text; .filter-text span (inline) just covers the text glyphs */
-#issues-table tbody td:nth-child(3),
-#issues-table thead th:nth-child(3) { min-width: 120px; max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* check name */
-
-#issues-table tbody td:nth-child(4),
-#issues-table thead th:nth-child(4) { min-width: 50px; max-width: 140px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* source */
-
-#issues-table tbody td:nth-child(5),
-#issues-table thead th:nth-child(5) { min-width: 50px; max-width: 200px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* file */
-
-#issues-table tbody td:nth-child(6),
-#issues-table thead th:nth-child(6) { white-space: nowrap; text-align: right; } /* line */
-
-#issues-table tbody td:nth-child(7),
-#issues-table thead th:nth-child(7) { min-width: 160px; max-width: 420px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } /* description */
+/* Per-column constraints — class-based so order is independent of position */
+#issues-table .col-severity    { white-space: nowrap; }
+#issues-table .col-categories  { min-width: 50px;  max-width: 160px; }
+#issues-table .col-check_name  { min-width: 120px; max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-sourceFile  { min-width: 50px;  max-width: 140px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-file        { min-width: 50px;  max-width: 200px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-line        { white-space: nowrap; text-align: right; }
+#issues-table .col-description { min-width: 160px; max-width: 420px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#issues-table .col-custom      { min-width: 60px;  max-width: 160px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 #issues-table tbody tr {
   cursor: pointer;
@@ -360,6 +324,14 @@ h3 {
 .row-sev-minor    td:first-child { border-left: 3px solid #f9a825; }
 .row-sev-info     td:first-child { border-left: 3px solid #78909c; }
 
+/* ── Focus flash ─────────────────────────────────────────────────────────────── */
+
+@keyframes row-flash-anim {
+  0%, 100% { background: transparent; }
+  25%  { background: var(--vscode-editor-findMatchHighlightBackground, rgba(255,200,0,0.35)); }
+}
+.row-flash { animation: row-flash-anim 1.6s ease-out; }
+
 /* ── Expanded row ────────────────────────────────────────────────────────────── */
 
 .row-expanded {
@@ -456,6 +428,14 @@ h3 {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: max(12px, var(--vscode-font-size, 13px));
   opacity: 0.85;
+}
+
+/* Source file label in detail */
+.detail-source {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: max(11px, var(--vscode-font-size, 13px));
+  opacity: 0.55;
+  margin-top: 4px;
 }
 
 /* 6. Fingerprint — right-aligned, clickable to copy */

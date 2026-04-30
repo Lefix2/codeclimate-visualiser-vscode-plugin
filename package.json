@@ -32,9 +32,67 @@
         "codeclimateVisualiser.showChartLegends": {
           "type": "boolean",
           "default": false,
-          "description": "Show legends on the severity, category, and check-name charts."
+          "description": "Show legends on pie charts."
+        },
+        "codeclimateVisualiser.showSeverityFilter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show severity quick-filter checkboxes above the issue table."
+        },
+        "codeclimateVisualiser.showCategoryFilter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show category quick-filter badges above the issue table."
+        },
+        "codeclimateVisualiser.showCheckNameFilter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show check-name quick-filter badges above the issue table."
+        },
+        "codeclimateVisualiser.showSeverityChart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the 'By Severity' pie chart."
+        },
+        "codeclimateVisualiser.showCategoryChart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the 'By Category' pie chart."
+        },
+        "codeclimateVisualiser.showCheckNameChart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the 'Top Check Names' pie chart."
+        },
+        "codeclimateVisualiser.showSourceChart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the 'By Source' pie chart."
+        },
+        "codeclimateVisualiser.showFileChart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the 'Top Files' pie chart."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeclimate-sidebar",
+          "title": "CodeClimate",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeclimate-sidebar": [
+        {
+          "type": "webview",
+          "id": "codeclimateVisualiser.sourcesView",
+          "name": "Reports"
+        }
+      ]
     },
     "jsonValidation": [
       {
@@ -59,9 +117,9 @@
         "icon": "$(clear-all)"
       },
       {
-        "command": "codeclimateVisualiser.loadFromConfig",
-        "title": "CodeClimate: Load from Configured Paths",
-        "icon": "$(search)"
+        "command": "codeclimateVisualiser.reloadConfig",
+        "title": "CodeClimate: Reload Config",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -93,7 +151,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^2.32.0",
+    "@vscode/vsce": "^3.9.1",
     "mocha": "^10.4.0",
     "tsx": "^4.21.0",
     "typescript": "^5.3.0"

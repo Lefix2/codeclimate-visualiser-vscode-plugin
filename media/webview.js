@@ -19,12 +19,24 @@ const PALETTE = [
   '#ff9f40','#c9cbcf','#e74c3c','#2ecc71','#3498db',
   '#f39c12','#9b59b6','#1abc9c','#34495e','#e67e22',
 ];
-const COL_COUNT = 7;
+
+// Base column definitions with their default sort index (sourceFile removed — shown in detail panel)
+const BASE_COLS = [
+  { key: 'severity',    label: 'Severity',    baseIndex: 0 },
+  { key: 'categories',  label: 'Category',    baseIndex: 1 },
+  { key: 'check_name',  label: 'Check Name',  baseIndex: 2 },
+  { key: 'file',        label: 'File',        baseIndex: 3 },
+  { key: 'line',        label: 'Line',        baseIndex: 4 },
+  { key: 'description', label: 'Description', baseIndex: 5 },
+];
 
 /** @type {any[]} */
 let allIssues = [];
 /** @type {any[]} */
 let allFiles = [];
+
+/** @type {Array<{name:string, index:number}>} custom column definitions from config */
+let customColumnDefs = [];
 
 /**
  * @type {{
@@ -32,7 +44,8 @@ let allFiles = [];
  *   categories: Set<string>|null,
  *   quickTerms: Set<string>,
  *   sourceFiles: Set<string>,
- *   search: string
+ *   search: string,
+ *   custom: Record<string, Set<string>|null>
  * }}
  */
 let filters = {
@@ -41,10 +54,22 @@ let filters = {
   quickTerms: new Set(),
   sourceFiles: new Set(),
   search: '',
+  custom: {},
 };
 
-/** @type {{ showChartLegends: boolean }} */
-let config = { showChartLegends: false };
+let config = {
+  showChartLegends:    false,
+  showSeverityFilter:  true,
+  showCategoryFilter:  true,
+  showCheckNameFilter: true,
+  showSeverityChart:   true,
+  showCategoryChart:   true,
+  showCheckNameChart:  true,
+  showSourceChart:     true,
+  showFileChart:       true,
+  /** @type {Array<{name:string,index:number}>} */
+  customColumns: [],
+};
 
 /** @type {{ col: string, dir: 'asc'|'desc' }} */
 let sortState = { col: 'severity', dir: 'asc' };
@@ -62,6 +87,30 @@ const snippetCache = new Map();
 
 /** @type {Map<string, string>} snippet id → Prism language string */
 const snippetMeta = new Map();
+
+// ── Column management ─────────────────────────────────────────────────────────
+
+/**
+ * Returns all active columns sorted by display index.
+ * Base columns use their baseIndex; custom columns use their configured index.
+ * Tiebreaker: base before custom.
+ * @returns {Array<{key:string, label:string, baseIndex:number, isCustom?:boolean, name?:string}>}
+ */
+function getActiveColumns() {
+  const custom = customColumnDefs.map(c => ({
+    key: 'custom:' + c.name,
+    label: c.name,
+    baseIndex: c.index,
+    isCustom: true,
+    name: c.name,
+  }));
+  const all = [...BASE_COLS.map(c => ({ ...c })), ...custom];
+  all.sort((a, b) => {
+    if (a.baseIndex !== b.baseIndex) return a.baseIndex - b.baseIndex;
+    return (a.isCustom ? 1 : 0) - (b.isCustom ? 1 : 0);
+  });
+  return all;
+}
 
 // ── Prism language detection ──────────────────────────────────────────────────
 
@@ -83,6 +132,33 @@ function extToLang(filePath) {
   return map[ext] ?? 'plain';
 }
 
+// ── Custom column value resolution ───────────────────────────────────────────
+
+/** Read a dot-path from an object, e.g. "location.path" → issue.location.path */
+function getNestedField(obj, path) {
+  return path.split('.').reduce((o, k) => (o != null ? o[k] : undefined), obj);
+}
+
+/**
+ * Resolve the value of a custom column for a specific issue.
+ * fromField + fieldRegex takes priority over file-level values from PatternEntry.
+ * @param {any} issue
+ * @param {{name:string, fromField?:string, fieldRegex?:string, captureGroup?:number}} colDef
+ * @returns {string}
+ */
+function getIssueCustomValue(issue, colDef) {
+  if (colDef.fromField && colDef.fieldRegex) {
+    const fieldVal = String(getNestedField(issue, colDef.fromField) ?? '');
+    const match = fieldVal.match(new RegExp(colDef.fieldRegex));
+    if (match) {
+      const g = (colDef.captureGroup ?? 0) + 1; // regex match[0] = full, groups start at 1
+      return match[g] ?? '';
+    }
+    return '';
+  }
+  return (issue.customColumns ?? {})[colDef.name] ?? '';
+}
+
 /** Highlight a single line of code using Prism if grammar is available */
 function prismHighlight(text, lang) {
   if (lang === 'plain' || !window.Prism) return null;
@@ -99,15 +175,61 @@ window.addEventListener('message', (event) => {
     allIssues = msg.issues ?? [];
     allFiles  = msg.files  ?? [];
     if (msg.config) config = { ...config, ...msg.config };
+    customColumnDefs = config.customColumns ?? [];
     filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
+    // Reset custom filters for columns that no longer exist
+    const colNames = new Set(customColumnDefs.map(c => c.name));
+    for (const k of Object.keys(filters.custom)) {
+      if (!colNames.has(k)) delete filters.custom[k];
+    }
     render();
   } else if (msg.type === 'snippet') {
     snippetCache.set(msg.issueId, { lines: msg.lines, highlightLine: msg.highlightLine });
     const container = document.getElementById(snippetContainerId(msg.issueId));
     const lang = snippetMeta.get(msg.issueId) ?? 'plain';
     if (container) renderSnippet(container, msg.lines, msg.highlightLine, lang);
+  } else if (msg.type === 'focusIssue') {
+    handleFocusIssue(msg.issueId);
   }
 });
+
+function handleFocusIssue(issueId) {
+  // Reset all filters so the issue is guaranteed visible
+  filters.severities = new Set(SEVERITY_ORDER);
+  filters.categories = null;
+  filters.quickTerms = new Set();
+  filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
+  filters.search = '';
+  filters.custom = {};
+  const inp = /** @type {HTMLInputElement|null} */(document.getElementById('filter-search'));
+  if (inp) inp.value = '';
+
+  expandedIds.add(issueId);
+  newlyExpandedIds.add(issueId);
+  render();
+
+  if (!snippetCache.has(issueId)) {
+    const issue = allIssues.find(i => i.id === issueId);
+    if (issue) {
+      const filePath = issue.location?.path ?? '';
+      const line = resolveLineRef(issue.location?.lines?.begin ?? issue.location?.positions?.begin);
+      snippetMeta.set(issueId, extToLang(filePath));
+      vscode.postMessage({ type: 'requestSnippet', issueId, filePath, line });
+    }
+  }
+
+  requestAnimationFrame(() => {
+    let targetRow = null;
+    for (const row of document.querySelectorAll('tr[data-issue-id]')) {
+      if (/** @type {HTMLElement} */(row).dataset.issueId === issueId) { targetRow = row; break; }
+    }
+    if (targetRow) {
+      targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      targetRow.classList.add('row-flash');
+      setTimeout(() => targetRow.classList.remove('row-flash'), 1600);
+    }
+  });
+}
 
 // ── Filtering ─────────────────────────────────────────────────────────────────
 
@@ -127,28 +249,40 @@ function getFiltered() {
     for (const term of filters.quickTerms) {
       if (!matchesTerm(issue, term.toLowerCase())) return false;
     }
+    // Custom column filters (AND between columns, OR within a column's values)
+    for (const [colName, activeSet] of Object.entries(filters.custom)) {
+      if (!activeSet || activeSet.size === 0) continue;
+      const colDef = customColumnDefs.find(c => c.name === colName);
+      const val = colDef ? getIssueCustomValue(issue, colDef) : (issue.customColumns ?? {})[colName] ?? '';
+      if (!activeSet.has(val)) return false;
+    }
     if (typedTerms.length === 0) return true;
     return typedTerms.every(term => matchesTerm(issue, term));
   });
 }
 
 function matchesTerm(issue, term) {
-  return (
+  if (
     (issue.description    ?? '').toLowerCase().includes(term) ||
     (issue.location?.path ?? '').toLowerCase().includes(term) ||
     (issue.check_name     ?? '').toLowerCase().includes(term) ||
     (issue.sourceFile     ?? '').toLowerCase().includes(term) ||
     (issue.categories     ?? []).some(/** @param {string} c */ c => c.toLowerCase().includes(term))
-  );
+  ) return true;
+  for (const val of Object.values(issue.customColumns ?? {})) {
+    if ((val ?? '').toLowerCase().includes(term)) return true;
+  }
+  return false;
 }
 
 /** @param {string} value */
 function applyQuickFilter(value) {
   const v = value.trim();
+  if (!v) return;
   const existing = [...filters.quickTerms].find(t => t.toLowerCase() === v.toLowerCase());
   if (existing !== undefined) filters.quickTerms.delete(existing);
   else filters.quickTerms.add(v);
-  renderActiveFilters(); renderCharts(); renderTable();
+  renderCheckNameFilter(); renderActiveFilters(); renderCharts(); renderTable();
 }
 
 /** @param {string} value */
@@ -173,7 +307,36 @@ function toggleCategoryFilter(cat) {
   } else {
     filters.categories.add(cat);
   }
-  renderActiveFilters(); renderCharts(); renderTable();
+  renderCategoryFilter(); renderActiveFilters(); renderCharts(); renderTable();
+}
+
+/** Isolate one source file (click again to restore all). */
+function toggleSourceFileFilter(filename) {
+  const file = allFiles.find(f => f.filename === filename);
+  if (!file) return;
+  const isIsolated = filters.sourceFiles.size === 1 && filters.sourceFiles.has(file.uri);
+  filters.sourceFiles = isIsolated
+    ? new Set(allFiles.map(/** @param {any} f */ f => f.uri))
+    : new Set([file.uri]);
+  renderCharts(); renderTable();
+}
+
+/**
+ * Toggle a value in a custom column filter (OR logic within column).
+ * @param {string} colName
+ * @param {string} value
+ */
+function toggleCustomColumnFilter(colName, value) {
+  let activeSet = filters.custom[colName] ?? null;
+  if (activeSet === null) {
+    filters.custom[colName] = new Set([value]);
+  } else if (activeSet.has(value)) {
+    activeSet.delete(value);
+    if (activeSet.size === 0) filters.custom[colName] = null;
+  } else {
+    activeSet.add(value);
+  }
+  renderCustomColumnFilters(); renderActiveFilters(); renderCharts(); renderTable();
 }
 
 // ── Sorting ───────────────────────────────────────────────────────────────────
@@ -182,15 +345,21 @@ function getSorted(issues) {
   const { col, dir } = sortState;
   return [...issues].sort((a, b) => {
     let va, vb;
-    switch (col) {
-      case 'severity':    va = SEVERITY_ORDER.indexOf(a.severity ?? 'info'); vb = SEVERITY_ORDER.indexOf(b.severity ?? 'info'); break;
-      case 'line':        va = getBeginLine(a);          vb = getBeginLine(b);          break;
-      case 'file':        va = basename(a.location?.path ?? ''); vb = basename(b.location?.path ?? ''); break;
-      case 'sourceFile':  va = a.sourceFile  ?? '';      vb = b.sourceFile  ?? '';      break;
-      case 'check_name':  va = a.check_name  ?? '';      vb = b.check_name  ?? '';      break;
-      case 'description': va = a.description ?? '';      vb = b.description ?? '';      break;
-      case 'categories':  va = (a.categories ?? []).join(); vb = (b.categories ?? []).join(); break;
-      default: return 0;
+    if (col.startsWith('custom:')) {
+      const name = col.slice(7);
+      va = (a.customColumns ?? {})[name] ?? '';
+      vb = (b.customColumns ?? {})[name] ?? '';
+    } else {
+      switch (col) {
+        case 'severity':    va = SEVERITY_ORDER.indexOf(a.severity ?? 'info'); vb = SEVERITY_ORDER.indexOf(b.severity ?? 'info'); break;
+        case 'line':        va = getBeginLine(a);          vb = getBeginLine(b);          break;
+        case 'file':        va = basename(a.location?.path ?? ''); vb = basename(b.location?.path ?? ''); break;
+        case 'sourceFile':  va = a.sourceFile  ?? '';      vb = b.sourceFile  ?? '';      break;
+        case 'check_name':  va = a.check_name  ?? '';      vb = b.check_name  ?? '';      break;
+        case 'description': va = a.description ?? '';      vb = b.description ?? '';      break;
+        case 'categories':  va = (a.categories ?? []).join(); vb = (b.categories ?? []).join(); break;
+        default: return 0;
+      }
     }
     if (va < vb) return dir === 'asc' ? -1 : 1;
     if (va > vb) return dir === 'asc' ?  1 : -1;
@@ -205,30 +374,20 @@ function render() {
   el('empty-state').style.display  = hasData ? 'none' : '';
   el('main-content').style.display = hasData ? ''     : 'none';
   if (!hasData) return;
-  renderFileChips();
-  renderSeverityFilter();
+  const sev = document.getElementById('filter-severity');
+  const cat = document.getElementById('filter-categories');
+  const chk = document.getElementById('filter-checknames');
+  if (sev) sev.style.display = config.showSeverityFilter  ? '' : 'none';
+  if (cat) cat.style.display = config.showCategoryFilter  ? '' : 'none';
+  if (chk) chk.style.display = config.showCheckNameFilter ? '' : 'none';
+  if (config.showSeverityFilter)  renderSeverityFilter();
+  if (config.showCategoryFilter)  renderCategoryFilter();
+  if (config.showCheckNameFilter) renderCheckNameFilter();
+  renderCustomColumnFilters();
   renderActiveFilters();
+  renderTableHeader();
   renderCharts();
   renderTable();
-}
-
-// ── File chips ────────────────────────────────────────────────────────────────
-
-function renderFileChips() {
-  const container = el('file-chips');
-  container.innerHTML = '';
-  for (const file of allFiles) {
-    const chip = document.createElement('span');
-    chip.className = 'file-chip';
-    chip.textContent = `${file.filename} (${file.issueCount})`;
-    const btn = document.createElement('button');
-    btn.className = 'chip-remove';
-    btn.title = 'Remove this file';
-    btn.textContent = '×';
-    btn.addEventListener('click', () => vscode.postMessage({ type: 'removeSourceFile', uri: file.uri }));
-    chip.appendChild(btn);
-    container.appendChild(chip);
-  }
 }
 
 // ── Filter bar ────────────────────────────────────────────────────────────────
@@ -254,15 +413,87 @@ function renderSeverityFilter() {
   }
 }
 
-/** Isolate one source file (click again to restore all — same pattern as severity chart). */
-function toggleSourceFileFilter(filename) {
-  const file = allFiles.find(f => f.filename === filename);
-  if (!file) return;
-  const isIsolated = filters.sourceFiles.size === 1 && filters.sourceFiles.has(file.uri);
-  filters.sourceFiles = isIsolated
-    ? new Set(allFiles.map(/** @param {any} f */ f => f.uri))
-    : new Set([file.uri]);
-  renderCharts(); renderTable();
+function renderCategoryFilter() {
+  const container = document.getElementById('filter-categories');
+  if (!container) return;
+  container.innerHTML = '';
+  const values = [...new Set(allIssues.flatMap(i => i.categories?.length ? i.categories : []))].sort();
+  if (values.length === 0) return;
+  const group = document.createElement('div');
+  group.className = 'filter-group';
+  const lbl = document.createElement('span');
+  lbl.className = 'filter-label';
+  lbl.textContent = 'Category:';
+  group.appendChild(lbl);
+  for (const cat of values) {
+    const badge = document.createElement('span');
+    const isActive = filters.categories !== null && filters.categories.has(cat);
+    badge.className = 'cat-badge' + (isActive ? ' cat-active' : '');
+    badge.textContent = cat;
+    badge.title = `${cat} — click to filter`;
+    badge.addEventListener('click', (e) => { e.stopPropagation(); toggleCategoryFilter(cat); });
+    group.appendChild(badge);
+  }
+  container.appendChild(group);
+}
+
+function renderCheckNameFilter() {
+  const container = document.getElementById('filter-checknames');
+  if (!container) return;
+  container.innerHTML = '';
+  const counts = countBy(allIssues, i => [i.check_name ?? '']);
+  const top = topN(counts, 15);
+  const names = Object.keys(top.counts).filter(l => l !== '');
+  if (names.length === 0) return;
+  const group = document.createElement('div');
+  group.className = 'filter-group';
+  const lbl = document.createElement('span');
+  lbl.className = 'filter-label';
+  lbl.textContent = 'Check Name:';
+  group.appendChild(lbl);
+  for (const name of names) {
+    const badge = document.createElement('span');
+    const isActive = [...filters.quickTerms].some(t => t.toLowerCase() === name.toLowerCase());
+    badge.className = 'cat-badge' + (isActive ? ' cat-active' : '');
+    badge.textContent = name;
+    badge.title = `${name} — click to filter`;
+    badge.addEventListener('click', (e) => { e.stopPropagation(); applyQuickFilter(name); });
+    group.appendChild(badge);
+  }
+  container.appendChild(group);
+}
+
+function renderCustomColumnFilters() {
+  const container = document.getElementById('filter-custom');
+  if (!container) return;
+  container.innerHTML = '';
+
+  for (const colDef of customColumnDefs) {
+    if (colDef.showQuickFilter === false) continue;
+    const values = [...new Set(allIssues.map(i => getIssueCustomValue(i, colDef)))].filter(v => v !== '').sort();
+    if (values.length === 0) continue;
+    if (values.length <= 1 && colDef.showQuickFilter !== true) continue;
+
+    const group = document.createElement('div');
+    group.className = 'filter-group';
+
+    const label = document.createElement('span');
+    label.className = 'filter-label';
+    label.textContent = colDef.name + ':';
+    group.appendChild(label);
+
+    const activeSet = filters.custom[colDef.name] ?? null;
+    for (const val of values) {
+      const badge = document.createElement('span');
+      const isActive = activeSet !== null && activeSet.has(val);
+      badge.className = 'cat-badge' + (isActive ? ' cat-active' : '');
+      badge.textContent = val;
+      badge.title = `${val} — click to filter`;
+      badge.addEventListener('click', (e) => { e.stopPropagation(); toggleCustomColumnFilter(colDef.name, val); });
+      group.appendChild(badge);
+    }
+    container.appendChild(group);
+  }
 }
 
 function renderActiveFilters() {
@@ -271,6 +502,12 @@ function renderActiveFilters() {
   if (filters.categories !== null) {
     for (const cat of filters.categories) {
       container.appendChild(makeChip('cat: ' + cat, 'cat-filter-chip', () => toggleCategoryFilter(cat)));
+    }
+  }
+  for (const [colName, activeSet] of Object.entries(filters.custom)) {
+    if (!activeSet) continue;
+    for (const val of activeSet) {
+      container.appendChild(makeChip(`${colName}: ${val}`, 'cat-filter-chip', () => toggleCustomColumnFilter(colName, val)));
     }
   }
   for (const term of filters.quickTerms) {
@@ -302,29 +539,107 @@ document.getElementById('filter-search')?.addEventListener('input', (e) => {
   renderActiveFilters(); renderCharts(); renderTable();
 });
 
+// ── Table header (dynamic) ────────────────────────────────────────────────────
+
+function renderTableHeader() {
+  const thead = document.getElementById('issues-thead');
+  if (!thead) return;
+  thead.innerHTML = '';
+  const tr = document.createElement('tr');
+  for (const col of getActiveColumns()) {
+    const th = document.createElement('th');
+    th.setAttribute('data-col', col.key);
+    th.textContent = col.label;
+    th.className = 'col-' + colCssKey(col.key);
+    if (sortState.col === col.key) th.classList.add(sortState.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+    th.addEventListener('click', () => {
+      sortState.dir = (sortState.col === col.key && sortState.dir === 'asc') ? 'desc' : 'asc';
+      sortState.col = col.key;
+      renderTableHeader();
+      renderTable();
+    });
+    tr.appendChild(th);
+  }
+  thead.appendChild(tr);
+}
+
+/** @param {string} key  column key → safe CSS class segment */
+function colCssKey(key) { return key.replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
 // ── Charts ────────────────────────────────────────────────────────────────────
+
+function showBuiltinChart(cardId, canvasId, visible) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  card.style.display = visible ? '' : 'none';
+  if (!visible && charts[canvasId]) { charts[canvasId].destroy(); delete charts[canvasId]; }
+}
 
 function renderCharts() {
   const filtered = getFiltered();
-  renderPieChart('chart-severity',
-    countBy(filtered, i => [i.severity ?? 'info'], SEVERITY_ORDER, SEVERITY_COLORS),
-    (label) => {
-      const isIsolated = filters.severities.size === 1 && filters.severities.has(label);
-      filters.severities = isIsolated ? new Set(SEVERITY_ORDER) : new Set([label]);
-      renderSeverityFilter(); renderCharts(); renderTable();
-    });
-  renderPieChart('chart-category',
-    countBy(filtered, i => i.categories?.length ? i.categories : ['Uncategorized']),
-    (label) => toggleCategoryFilter(label));
-  renderPieChart('chart-checkname',
-    topN(countBy(filtered, i => [i.check_name ?? '—']), 10),
-    (label) => applyQuickFilter(label));
-  renderPieChart('chart-source',
-    countBy(filtered, i => [i.sourceFile ?? '—']),
-    (label) => toggleSourceFileFilter(label));
-  renderPieChart('chart-file',
-    topN(countBy(filtered, i => [basename(i.location?.path ?? '—')]), 10),
-    (label) => applyQuickFilter(label));
+
+  showBuiltinChart('card-severity', 'chart-severity', config.showSeverityChart);
+  if (config.showSeverityChart) {
+    renderPieChart('chart-severity',
+      countBy(filtered, i => [i.severity ?? 'info'], SEVERITY_ORDER, SEVERITY_COLORS),
+      (label) => {
+        const isIsolated = filters.severities.size === 1 && filters.severities.has(label);
+        filters.severities = isIsolated ? new Set(SEVERITY_ORDER) : new Set([label]);
+        renderSeverityFilter(); renderCharts(); renderTable();
+      });
+  }
+
+  showBuiltinChart('card-category', 'chart-category', config.showCategoryChart);
+  if (config.showCategoryChart) {
+    renderPieChart('chart-category',
+      countBy(filtered, i => i.categories?.length ? i.categories : ['Uncategorized']),
+      (label) => toggleCategoryFilter(label));
+  }
+
+  showBuiltinChart('card-checkname', 'chart-checkname', config.showCheckNameChart);
+  if (config.showCheckNameChart) {
+    renderPieChart('chart-checkname',
+      topN(countBy(filtered, i => [i.check_name ?? '—']), 10),
+      (label) => applyQuickFilter(label));
+  }
+
+  showBuiltinChart('card-source', 'chart-source', config.showSourceChart);
+  if (config.showSourceChart) {
+    renderPieChart('chart-source',
+      countBy(filtered, i => [i.sourceFile ?? '—']),
+      (label) => toggleSourceFileFilter(label));
+  }
+
+  showBuiltinChart('card-file', 'chart-file', config.showFileChart);
+  if (config.showFileChart) {
+    renderPieChart('chart-file',
+      topN(countBy(filtered, i => [basename(i.location?.path ?? '—')]), 10),
+      (label) => applyQuickFilter(label));
+  }
+
+  // Dynamic custom column charts — destroy stale, rebuild
+  const chartsRow = document.getElementById('charts-row');
+  document.querySelectorAll('.chart-card-custom').forEach(card => {
+    const canvas = card.querySelector('canvas');
+    if (canvas && charts[canvas.id]) { charts[canvas.id].destroy(); delete charts[canvas.id]; }
+    card.remove();
+  });
+  for (const colDef of customColumnDefs) {
+    if (!colDef.showChart) continue;
+    const canvasId = 'chart-custom-' + colDef.name.replace(/[^a-zA-Z0-9]/g, '_');
+    const card = document.createElement('div');
+    card.className = 'chart-card chart-card-custom';
+    const h = document.createElement('h3');
+    h.textContent = colDef.name;
+    const canvas = document.createElement('canvas');
+    canvas.id = canvasId;
+    card.appendChild(h);
+    card.appendChild(canvas);
+    chartsRow?.appendChild(card);
+    renderPieChart(canvasId,
+      countBy(filtered, i => [getIssueCustomValue(i, colDef) || '—']),
+      (label) => { if (label !== '—') toggleCustomColumnFilter(colDef.name, label); });
+  }
 }
 
 function countBy(issues, keyFn, order, colorMap = {}) {
@@ -402,6 +717,7 @@ function renderTable() {
   const filtered = getSorted(getFiltered());
   const tbody = el('issues-tbody');
   tbody.innerHTML = '';
+  const activeCols = getActiveColumns();
 
   // Issues count above the table
   const countBar = document.getElementById('issues-count-bar');
@@ -421,54 +737,75 @@ function renderTable() {
     // ── Main row ──────────────────────────────────────────────────────────────
     const tr = document.createElement('tr');
     tr.className = `row-sev-${sev}${isExpanded ? ' row-expanded' : ''}`;
+    tr.dataset.issueId = issue.id;
     tr.title = 'Click to expand';
 
-    // Severity — click isolates
-    const tdSev = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = `severity-badge sev-${sev} sev-badge-btn`;
-    badge.textContent = sev;
-    badge.title = `${sev} — click to isolate`;
-    badge.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const isIsolated = filters.severities.size === 1 && filters.severities.has(sev);
-      filters.severities = isIsolated ? new Set(SEVERITY_ORDER) : new Set([sev]);
-      renderSeverityFilter(); renderCharts(); renderTable();
-    });
-    tdSev.appendChild(badge);
-    tr.appendChild(tdSev);
-
-    // Category
-    const tdCat = document.createElement('td');
-    for (const cat of (issue.categories ?? [])) {
-      const b = document.createElement('span');
-      const isCatActive = filters.categories !== null && filters.categories.has(cat);
-      b.className = 'cat-badge cat-clickable' + (isCatActive ? ' cat-active' : '');
-      b.textContent = cat;
-      b.title = `${cat} — click to filter`;
-      b.addEventListener('click', (e) => { e.stopPropagation(); toggleCategoryFilter(cat); });
-      tdCat.appendChild(b);
+    for (const col of activeCols) {
+      let td;
+      switch (col.key) {
+        case 'severity': {
+          td = document.createElement('td');
+          td.className = 'col-severity';
+          const badge = document.createElement('span');
+          badge.className = `severity-badge sev-${sev} sev-badge-btn`;
+          badge.textContent = sev;
+          badge.title = `${sev} — click to isolate`;
+          badge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isIsolated = filters.severities.size === 1 && filters.severities.has(sev);
+            filters.severities = isIsolated ? new Set(SEVERITY_ORDER) : new Set([sev]);
+            renderSeverityFilter(); renderCharts(); renderTable();
+          });
+          td.appendChild(badge);
+          break;
+        }
+        case 'categories': {
+          td = document.createElement('td');
+          td.className = 'col-categories';
+          for (const cat of (issue.categories ?? [])) {
+            const b = document.createElement('span');
+            const isCatActive = filters.categories !== null && filters.categories.has(cat);
+            b.className = 'cat-badge cat-clickable' + (isCatActive ? ' cat-active' : '');
+            b.textContent = cat;
+            b.title = `${cat} — click to filter`;
+            b.addEventListener('click', (e) => { e.stopPropagation(); toggleCategoryFilter(cat); });
+            td.appendChild(b);
+          }
+          break;
+        }
+        case 'check_name':
+          td = makeFilterCell(issue.check_name ?? '', 'cell-mono col-check_name', () => applyQuickFilter(issue.check_name ?? ''));
+          break;
+        case 'file': {
+          td = makeFilterCell(fname, 'cell-mono col-file', () => applyQuickFilter(fname));
+          td.title = filePath;
+          break;
+        }
+        case 'line': {
+          td = document.createElement('td');
+          td.className = 'cell-num col-line';
+          td.textContent = String(line);
+          break;
+        }
+        case 'description': {
+          td = document.createElement('td');
+          td.className = 'col-description';
+          td.title = issue.description;
+          td.textContent = issue.description;
+          break;
+        }
+        default: {
+          if (col.isCustom && col.name) {
+            const colDef = customColumnDefs.find(c => c.name === col.name);
+            const val = colDef ? getIssueCustomValue(issue, colDef) : '';
+            td = makeFilterCell(val, 'cell-mono col-custom', () => { if (val && col.name) toggleCustomColumnFilter(col.name, val); });
+          } else {
+            td = document.createElement('td');
+          }
+        }
+      }
+      tr.appendChild(td);
     }
-    tr.appendChild(tdCat);
-
-    // Check Name, Source file, File — filter text spans
-    tr.appendChild(makeFilterCell(issue.check_name ?? '', 'cell-mono', () => applyQuickFilter(issue.check_name ?? '')));
-    tr.appendChild(makeFilterCell(issue.sourceFile  ?? '', 'cell-mono', () => applyQuickFilter(issue.sourceFile  ?? '')));
-    const tdFile = makeFilterCell(fname, 'cell-mono', () => applyQuickFilter(fname));
-    tdFile.title = filePath;
-    tr.appendChild(tdFile);
-
-    // Line
-    const tdLine = document.createElement('td');
-    tdLine.className = 'cell-num';
-    tdLine.textContent = String(line);
-    tr.appendChild(tdLine);
-
-    // Description
-    const tdDesc = document.createElement('td');
-    tdDesc.title = issue.description;
-    tdDesc.textContent = issue.description;
-    tr.appendChild(tdDesc);
 
     // Row click → expand / collapse
     tr.addEventListener('click', () => {
@@ -497,14 +834,12 @@ function renderTable() {
 
     // ── Detail row ────────────────────────────────────────────────────────────
     if (isExpanded) {
-      const detailTr = makeDetailRow(issue, line, filePath);
+      const detailTr = makeDetailRow(issue, line, filePath, activeCols.length);
       tbody.appendChild(detailTr);
       const anim = detailTr.querySelector('.detail-anim');
       if (newlyExpandedIds.has(issue.id)) {
-        // Animate slide-down only for newly expanded rows
         if (anim) requestAnimationFrame(() => anim.classList.add('detail-anim-open'));
       } else {
-        // Already expanded — show immediately, no animation
         if (anim) anim.classList.add('detail-anim-open');
       }
     }
@@ -538,20 +873,20 @@ function makeFilterCell(text, extraClass, onClick) {
  * @param {any} issue
  * @param {number} line
  * @param {string} fullPath
+ * @param {number} colSpan
  */
-function makeDetailRow(issue, line, fullPath) {
+function makeDetailRow(issue, line, fullPath, colSpan) {
   const tr = document.createElement('tr');
   tr.className = 'detail-row';
 
   const td = document.createElement('td');
-  td.colSpan = COL_COUNT;
+  td.colSpan = colSpan;
 
   const anim = document.createElement('div');
   anim.className = 'detail-anim';
 
   const wrap = document.createElement('div');
   wrap.className = 'detail-content';
-  // Prevent detail content clicks from bubbling to tr (which has no handler but looks clickable)
   wrap.addEventListener('click', e => e.stopPropagation());
 
   // 1. Full path:line — clickable, opens file
@@ -578,7 +913,7 @@ function makeDetailRow(issue, line, fullPath) {
   // 3. Code snippet (main location)
   wrap.appendChild(makeSnippetContainer(issue.id));
 
-  // 4. Body (fix guidance) — often markdown; show as pre-wrap
+  // 4. Body (fix guidance)
   if (issue.content?.body) {
     const bodyEl = document.createElement('div');
     bodyEl.className = 'detail-body';
@@ -586,7 +921,7 @@ function makeDetailRow(issue, line, fullPath) {
     wrap.appendChild(bodyEl);
   }
 
-  // 5. Other locations — each with label, clickable path, snippet
+  // 5. Other locations
   for (const [idx, ol] of (issue.other_locations ?? []).entries()) {
     const olPath = ol.path ?? '';
     const olLine = resolveLineRef(ol.lines?.begin ?? ol.positions?.begin);
@@ -613,7 +948,15 @@ function makeDetailRow(issue, line, fullPath) {
     wrap.appendChild(block);
   }
 
-  // 6. Fingerprint — right-aligned, click copies
+  // 6. Source file label
+  if (issue.sourceFile) {
+    const srcEl = document.createElement('div');
+    srcEl.className = 'detail-source';
+    srcEl.textContent = issue.sourceFile;
+    wrap.appendChild(srcEl);
+  }
+
+  // 7. Fingerprint — right-aligned, click copies
   if (issue.fingerprint) {
     const fpEl = document.createElement('div');
     fpEl.className = 'detail-fingerprint';
@@ -698,19 +1041,6 @@ function isActiveFilter(value) {
   for (const t of filters.quickTerms) { if (lv.includes(t.toLowerCase())) return true; }
   return false;
 }
-
-// ── Table header sort ─────────────────────────────────────────────────────────
-
-document.querySelectorAll('#issues-table th[data-col]').forEach((th) => {
-  th.addEventListener('click', () => {
-    const col = th.getAttribute('data-col') ?? '';
-    sortState.dir = (sortState.col === col && sortState.dir === 'asc') ? 'desc' : 'asc';
-    sortState.col = col;
-    document.querySelectorAll('#issues-table th[data-col]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
-    th.classList.add(sortState.dir === 'asc' ? 'sort-asc' : 'sort-desc');
-    renderTable();
-  });
-});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

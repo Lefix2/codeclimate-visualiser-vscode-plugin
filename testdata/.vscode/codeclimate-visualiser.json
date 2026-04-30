@@ -1,3 +1,27 @@
 {
-  "reportPatterns": ["reports/*-*.json"]
+  "customColumns": [
+    {
+      "name": "outil",
+      "index": 0,
+      "showChart": false,
+      "showQuickFilter": true
+    },
+    {
+      "name": "sous-système",
+      "index": 2,
+      "showChart": true,
+      "showQuickFilter": true,
+      "fromField": "location.path",
+      "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
+    }
+  ],
+  "reportPatterns": [
+    {
+      "glob": "reports/*-*.json",
+      "regex": "(\\w+)-(\\w+)\\.json",
+      "values": {
+        "outil": "$0"
+      }
+    }
+  ]
 }

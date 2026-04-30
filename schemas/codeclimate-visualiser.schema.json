@@ -5,18 +5,102 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "customColumns": {
+      "type": "array",
+      "description": "Extra columns to display in the issue table.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "index"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Column header label."
+          },
+          "index": {
+            "type": "integer",
+            "description": "Display order alongside built-in columns (Severity=0, Category=1, Check Name=2, Source=3, File=4, Line=5, Description=6). Custom columns with the same index as a built-in appear after it. Any value > 6 places the column last."
+          },
+          "showFilter": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show quick-filter badges for this column's unique values in the filter bar."
+          },
+          "showChart": {
+            "type": "boolean",
+            "default": false,
+            "description": "Show a pie chart for this column's value distribution."
+          },
+          "fromField": {
+            "type": "string",
+            "description": "Dot-path into the issue object (e.g. 'location.path'). When set, the column value is extracted from each issue's field using fieldRegex, overriding any value from reportPatterns."
+          },
+          "fieldRegex": {
+            "type": "string",
+            "description": "Regular expression applied to the issue field named by fromField. The capture group selected by captureGroup (default 0) becomes the column value."
+          },
+          "captureGroup": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "0-indexed capture group from fieldRegex to use as the value."
+          }
+        }
+      },
+      "examples": [
+        [
+          { "name": "outil", "index": 3, "showChart": true },
+          {
+            "name": "sous-système",
+            "index": 4,
+            "showFilter": true,
+            "showChart": true,
+            "fromField": "location.path",
+            "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
+          }
+        ]
+      ]
+    },
     "reportPatterns": {
       "type": "array",
-      "description": "Glob patterns (workspace-relative) or absolute paths to CodeClimate JSON/NDJSON report files. Used by 'CodeClimate: Load from Configured Paths'.",
+      "description": "Glob patterns or absolute paths to CodeClimate JSON/NDJSON report files. Each entry is either a plain glob string or a pattern object with optional regex extraction for custom column values.",
       "items": {
-        "type": "string",
-        "description": "A glob pattern (e.g. '**/codeclimate.json', 'reports/*.json') or an absolute file path."
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Workspace-relative glob pattern or absolute path."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["glob"],
+            "properties": {
+              "glob": {
+                "type": "string",
+                "description": "Workspace-relative glob pattern or absolute path."
+              },
+              "regex": {
+                "type": "string",
+                "description": "Regular expression applied to the matched filename (basename). Capture groups are referenced in 'values' via $0, $1, … (0-indexed)."
+              },
+              "values": {
+                "type": "object",
+                "description": "Map of custom column name → value. Use $0, $1, … for regex capture groups, or plain strings for static values. Null or omitted = empty. Overridden per-issue when the column defines fromField.",
+                "additionalProperties": { "type": ["string", "null"] }
+              }
+            }
+          }
+        ]
       },
-      "default": [],
       "examples": [
         ["**/codeclimate.json"],
-        ["reports/codeclimate.json", "reports/rubocop.json"],
-        ["/home/user/project/codeclimate.json"]
+        [
+          {
+            "glob": "reports/*-*.json",
+            "regex": "(\\w+)-(\\w+)\\.json",
+            "values": { "outil": "$0" }
+          }
+        ]
       ]
     }
   }
