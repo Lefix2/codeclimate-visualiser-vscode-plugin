@@ -73,8 +73,7 @@
           "type": "boolean",
           "default": true,
           "description": "Show the 'Top Files' pie chart."
-        },
-
+        }
       }
     },
     "viewsContainers": {

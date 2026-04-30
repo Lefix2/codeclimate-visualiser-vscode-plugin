@@ -469,10 +469,10 @@ function renderCustomColumnFilters() {
   container.innerHTML = '';
 
   for (const colDef of customColumnDefs) {
-    if (colDef.showFilter === false) continue;
+    if (colDef.showQuickFilter === false) continue;
     const values = [...new Set(allIssues.map(i => getIssueCustomValue(i, colDef)))].filter(v => v !== '').sort();
     if (values.length === 0) continue;
-    if (values.length <= 1 && colDef.showFilter !== true) continue;
+    if (values.length <= 1 && colDef.showQuickFilter !== true) continue;
 
     const group = document.createElement('div');
     group.className = 'filter-group';

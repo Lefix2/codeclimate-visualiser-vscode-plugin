@@ -48,7 +48,8 @@ export interface IssueWithSource extends CodeClimateIssue {
 export interface CustomColumn {
   name: string;
   index: number;
-  showFilter?: boolean;    // default true — show filter badges in filter bar
+  showQuickFilter?: boolean; // default true — show filter badges in main webview filter bar
+  showFilter?: boolean;      // default true — show text filter input in sidebar filter panel
   showChart?: boolean;     // default false — show a pie chart for this column
   fromField?: string;      // dot-path into issue object (e.g. "location.path")
   fieldRegex?: string;     // regex applied to fromField value

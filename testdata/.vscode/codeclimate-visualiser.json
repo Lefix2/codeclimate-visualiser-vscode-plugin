@@ -4,13 +4,13 @@
       "name": "outil",
       "index": 0,
       "showChart": false,
-      "showFilter": true
+      "showQuickFilter": true
     },
     {
       "name": "sous-système",
       "index": 2,
       "showChart": true,
-      "showFilter": true,
+      "showQuickFilter": true,
       "fromField": "location.path",
       "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
     }

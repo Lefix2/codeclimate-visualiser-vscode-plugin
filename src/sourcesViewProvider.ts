@@ -53,8 +53,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       check_name: i.check_name,
       sourceFile: i.sourceFile,
       location: i.location,
+      customColumns: i.customColumns,
     }));
-    this.view.webview.postMessage({ type: 'update', files, issues });
+    const customColumns = this.issueManager.getCustomColumns();
+    this.view.webview.postMessage({ type: 'update', files, issues, customColumns });
   }
 
   private buildHtml(): string {
@@ -131,6 +133,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
     .hdr-more { opacity: 0.55; margin-left: 2px; }
     .hdr-more:hover { opacity: 1; }
+    .hdr-more.active { opacity: 1; color: var(--vscode-button-background); }
 
     /* ── Sources list ───────────────────────── */
     .source-item { display: flex; align-items: center; height: 22px; padding: 0 8px; gap: 4px; }
@@ -188,6 +191,36 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     .file-group-body.open { display: block; }
     .file-group-body .file-mode-item { padding: 0 4px 0 28px; }
 
+    /* ── Filter dropdown ────────────────────── */
+    #filter-dropdown { width: 214px; }
+    .filter-section-lbl {
+      padding: 4px 10px 2px; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.5; user-select: none;
+    }
+    .filter-sev-item {
+      display: flex; align-items: center; height: 24px; padding: 0 10px; gap: 6px;
+      cursor: pointer; color: var(--vscode-menu-foreground, var(--vscode-foreground)); user-select: none;
+    }
+    .filter-sev-item:hover { background: var(--vscode-list-hoverBackground); }
+    .filter-sev-item input[type="checkbox"] { margin: 0; cursor: pointer; accent-color: var(--vscode-button-background); }
+    .filter-input-wrap { padding: 2px 8px; }
+    .filter-input {
+      width: 100%; padding: 3px 6px;
+      background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, rgba(128,128,128,0.3));
+      border-radius: 2px; outline: none;
+      font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
+    }
+    .filter-input:focus { border-color: var(--vscode-focusBorder); }
+    .filter-clear-btn {
+      display: block; width: calc(100% - 16px); margin: 4px 8px 2px;
+      padding: 3px 8px; cursor: pointer;
+      background: none; border: 1px solid rgba(128,128,128,0.3);
+      color: var(--vscode-foreground); border-radius: 2px;
+      font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); text-align: center;
+    }
+    .filter-clear-btn:hover { background: var(--vscode-list-hoverBackground); }
+
     /* ── Dropdowns ──────────────────────────── */
     .dropdown {
       position: fixed;
@@ -235,12 +268,32 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       <span class="arrow" id="issues-arrow"></span>
       <span class="hdr-title">Issues</span>
       <span class="hdr-count" id="issues-count"></span>
+      <button class="icon-btn hdr-more" id="btn-filter" title="Filter"></button>
       <button class="icon-btn hdr-more" id="btn-sort" title="Sort"></button>
       <button class="icon-btn hdr-more" id="btn-more" title="View options"></button>
     </div>
     <div class="section-body-flex open" id="issues-body">
       <div id="issues-list"></div>
     </div>
+  </div>
+
+  <!-- Filter dropdown -->
+  <div class="dropdown" id="filter-dropdown">
+    <div class="filter-section-lbl">Severity</div>
+    <label class="filter-sev-item"><input type="checkbox" class="filter-sev-cb" value="blocker"><span class="sev-dot" style="background:#7b1fa2"></span><span>Blocker</span></label>
+    <label class="filter-sev-item"><input type="checkbox" class="filter-sev-cb" value="critical"><span class="sev-dot" style="background:#e53935"></span><span>Critical</span></label>
+    <label class="filter-sev-item"><input type="checkbox" class="filter-sev-cb" value="major"><span class="sev-dot" style="background:#f4511e"></span><span>Major</span></label>
+    <label class="filter-sev-item"><input type="checkbox" class="filter-sev-cb" value="minor"><span class="sev-dot" style="background:#f9a825"></span><span>Minor</span></label>
+    <label class="filter-sev-item"><input type="checkbox" class="filter-sev-cb" value="info"><span class="sev-dot" style="background:#78909c"></span><span>Info</span></label>
+    <div class="dropdown-sep"></div>
+    <div class="filter-section-lbl">Check Name</div>
+    <div class="filter-input-wrap"><input class="filter-input" type="text" id="fcheck" placeholder="Filter…"></div>
+    <div class="dropdown-sep"></div>
+    <div class="filter-section-lbl">File Name</div>
+    <div class="filter-input-wrap"><input class="filter-input" type="text" id="ffile" placeholder="Filter…"></div>
+    <div id="filter-custom-cols"></div>
+    <div class="dropdown-sep"></div>
+    <button class="filter-clear-btn" id="btn-filter-clear">Clear filters</button>
   </div>
 
   <!-- Sort dropdown -->
@@ -267,6 +320,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     let lastIssues = [];
     let sortBy  = 'severity';  // 'severity' | 'checkname' | 'filename'
     let sortDir = 'asc';       // 'asc' | 'desc'
+    let filters = { severities: new Set(), checkName: '', fileName: '', custom: {} };
 
     // ── SVG icons ────────────────────────────────────────────────────────
     const ICONS = {
@@ -274,13 +328,15 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       chevronDown:  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,5.5 8,10.5 13,5.5"/></svg>',
       close:        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>',
       focusTable:   '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="6" y1="3" x2="6" y2="13"/></svg>',
+      filter:       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,3 14,3 9,9 9,14 7,14 7,9"/></svg>',
       sort:         '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="10" y2="4"/><line x1="2" y1="8" x2="7" y2="8"/><line x1="2" y1="12" x2="5" y2="12"/><polyline points="12,2 12,14"/><polyline points="9,11 12,14 15,11"/></svg>',
       ellipsis:     '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/></svg>',
       folder:       '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4C1.5 3.45 1.95 3 2.5 3H5.5L7 4.5H11.5C12.05 4.5 12.5 4.95 12.5 5.5V10.5C12.5 11.05 12.05 11.5 11.5 11.5H2.5C1.95 11.5 1.5 11.05 1.5 10.5V4z"/></svg>',
     };
 
-    document.getElementById('btn-sort').innerHTML = ICONS.sort;
-    document.getElementById('btn-more').innerHTML  = ICONS.ellipsis;
+    document.getElementById('btn-filter').innerHTML = ICONS.filter;
+    document.getElementById('btn-sort').innerHTML   = ICONS.sort;
+    document.getElementById('btn-more').innerHTML   = ICONS.ellipsis;
 
     // ── Helpers ──────────────────────────────────────────────────────────
     function maxSev(issues) {
@@ -306,6 +362,55 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
         (issue.location.lines && issue.location.lines.begin)
       );
       return extractLine(raw) || 0;
+    }
+
+    // ── Filter logic ─────────────────────────────────────────────────────
+    function filtersActive() {
+      return filters.severities.size > 0 || filters.checkName !== '' || filters.fileName !== '' ||
+        Object.values(filters.custom).some(v => v !== '');
+    }
+    function applyFilters(issues) {
+      if (!filtersActive()) return issues;
+      return issues.filter(i => {
+        if (filters.severities.size > 0 && !filters.severities.has(i.severity)) return false;
+        if (filters.checkName && !(i.check_name || '').toLowerCase().includes(filters.checkName.toLowerCase())) return false;
+        if (filters.fileName) {
+          const p = (i.location && i.location.path) || '';
+          if (!p.toLowerCase().includes(filters.fileName.toLowerCase())) return false;
+        }
+        for (const [col, val] of Object.entries(filters.custom)) {
+          if (!val) continue;
+          const colVal = (i.customColumns && i.customColumns[col]) || '';
+          if (!colVal.toLowerCase().includes(val.toLowerCase())) return false;
+        }
+        return true;
+      });
+    }
+    function updateFilterBtn() {
+      const active = filtersActive();
+      document.getElementById('btn-filter').classList.toggle('active', active);
+      document.getElementById('btn-filter').title = active ? 'Filters active' : 'Filter';
+    }
+    function rebuildCustomFilterInputs(customColumns) {
+      const container = document.getElementById('filter-custom-cols');
+      container.innerHTML = '';
+      const visible = (customColumns || []).filter(c => c.showFilter !== false);
+      for (const col of visible) {
+        const sep = document.createElement('div'); sep.className = 'dropdown-sep';
+        const lbl = document.createElement('div'); lbl.className = 'filter-section-lbl';
+        lbl.textContent = col.name;
+        const wrap = document.createElement('div'); wrap.className = 'filter-input-wrap';
+        const inp = document.createElement('input');
+        inp.className = 'filter-input'; inp.type = 'text'; inp.placeholder = 'Filter…';
+        inp.value = filters.custom[col.name] || '';
+        inp.dataset.col = col.name;
+        inp.addEventListener('input', e => {
+          filters.custom[e.target.dataset.col] = e.target.value;
+          updateFilterBtn(); renderIssues(lastIssues);
+        });
+        wrap.appendChild(inp);
+        container.appendChild(sep); container.appendChild(lbl); container.appendChild(wrap);
+      }
     }
 
     // ── Sort logic ───────────────────────────────────────────────────────
@@ -343,6 +448,44 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.openFiles' });
     });
 
+    // ── Filter dropdown ──────────────────────────────────────────────────
+    const btnFilter      = document.getElementById('btn-filter');
+    const filterDropdown = document.getElementById('filter-dropdown');
+
+    btnFilter.addEventListener('click', e => {
+      e.stopPropagation();
+      const rect = btnFilter.getBoundingClientRect();
+      filterDropdown.style.left = Math.max(0, rect.right - 214) + 'px';
+      filterDropdown.style.top  = (rect.bottom + 2) + 'px';
+      filterDropdown.classList.toggle('open');
+      document.getElementById('sort-dropdown').classList.remove('open');
+      document.getElementById('group-dropdown').classList.remove('open');
+    });
+    filterDropdown.addEventListener('click', e => e.stopPropagation());
+
+    document.querySelectorAll('.filter-sev-cb').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) filters.severities.add(cb.value);
+        else filters.severities.delete(cb.value);
+        updateFilterBtn(); renderIssues(lastIssues);
+      });
+    });
+    document.getElementById('fcheck').addEventListener('input', e => {
+      filters.checkName = e.target.value; updateFilterBtn(); renderIssues(lastIssues);
+    });
+    document.getElementById('ffile').addEventListener('input', e => {
+      filters.fileName = e.target.value; updateFilterBtn(); renderIssues(lastIssues);
+    });
+    document.getElementById('btn-filter-clear').addEventListener('click', () => {
+      filters.severities.clear(); filters.checkName = ''; filters.fileName = ''; filters.custom = {};
+      document.querySelectorAll('.filter-sev-cb').forEach(cb => cb.checked = false);
+      document.getElementById('fcheck').value = '';
+      document.getElementById('ffile').value  = '';
+      document.querySelectorAll('#filter-custom-cols .filter-input').forEach(inp => inp.value = '');
+      updateFilterBtn(); renderIssues(lastIssues);
+      filterDropdown.classList.remove('open');
+    });
+
     // ── Sort dropdown ────────────────────────────────────────────────────
     const btnSort    = document.getElementById('btn-sort');
     const sortDropdown = document.getElementById('sort-dropdown');
@@ -353,6 +496,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       sortDropdown.style.left = Math.max(0, rect.right - 180) + 'px';
       sortDropdown.style.top  = (rect.bottom + 2) + 'px';
       sortDropdown.classList.toggle('open');
+      filterDropdown.classList.remove('open');
       document.getElementById('group-dropdown').classList.remove('open');
     });
 
@@ -389,10 +533,12 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       dropdown.style.top  = (rect.bottom + 2) + 'px';
       dropdown.classList.toggle('open');
       sortDropdown.classList.remove('open');
+      filterDropdown.classList.remove('open');
     });
     document.addEventListener('click', () => {
       dropdown.classList.remove('open');
       sortDropdown.classList.remove('open');
+      filterDropdown.classList.remove('open');
     });
     document.getElementById('menu-by-issue').addEventListener('click', () => {
       groupBy = 'issue'; updateGroupMenu(); dropdown.classList.remove('open'); renderIssues(lastIssues);
@@ -423,6 +569,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'update') {
+        rebuildCustomFilterInputs(msg.customColumns || []);
         renderSources(msg.files  || []);
         renderIssues (msg.issues || []);
       }
@@ -541,13 +688,17 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       const list     = document.getElementById('issues-list');
       if (!issues.length) { section.style.display = 'none'; list.innerHTML = ''; return; }
       section.style.display = '';
-      countEl.textContent = issues.length;
-      const sorted = applySort(issues);
+      const filtered = applyFilters(issues);
+      countEl.textContent = filtersActive()
+        ? filtered.length + '/' + issues.length
+        : issues.length;
+      const sorted = applySort(filtered);
       list.innerHTML = '';
       const frag = document.createDocumentFragment();
       if      (groupBy === 'file') renderByFile(sorted, frag);
       else if (groupBy === 'tree') renderTree(sorted, frag);
       else                         renderFlat(sorted, frag);
+
       list.appendChild(frag);
     }
 
