@@ -21,10 +21,15 @@
             "type": "integer",
             "description": "Display order alongside built-in columns (Severity=0, Category=1, Check Name=2, Source=3, File=4, Line=5, Description=6). Custom columns with the same index as a built-in appear after it. Any value > 6 places the column last."
           },
+          "showQuickFilter": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show quick-filter badges for this column's unique values in the main webview filter bar."
+          },
           "showFilter": {
             "type": "boolean",
             "default": true,
-            "description": "Show quick-filter badges for this column's unique values in the filter bar."
+            "description": "Show a text filter input for this column in the sidebar filter panel."
           },
           "showChart": {
             "type": "boolean",
@@ -53,7 +58,7 @@
           {
             "name": "sous-système",
             "index": 4,
-            "showFilter": true,
+            "showQuickFilter": true,
             "showChart": true,
             "fromField": "location.path",
             "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
