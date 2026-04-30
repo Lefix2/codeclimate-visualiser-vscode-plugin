@@ -321,6 +321,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     let sortBy  = 'severity';  // 'severity' | 'checkname' | 'filename'
     let sortDir = 'asc';       // 'asc' | 'desc'
     let filters = { severities: new Set(), checkName: '', fileName: '', custom: {} };
+    let customColumnDefs = [];  // CustomColumn[] from last update
 
     // ── SVG icons ────────────────────────────────────────────────────────
     const ICONS = {
@@ -364,6 +365,20 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       return extractLine(raw) || 0;
     }
 
+    // ── Custom column value resolution (mirrors webview.js) ──────────────
+    function getNestedField(obj, path) {
+      return path.split('.').reduce((o, k) => (o != null ? o[k] : undefined), obj);
+    }
+    function getSidebarCustomValue(issue, colDef) {
+      if (colDef.fromField && colDef.fieldRegex) {
+        const fieldVal = String(getNestedField(issue, colDef.fromField) ?? '');
+        const match = fieldVal.match(new RegExp(colDef.fieldRegex));
+        if (match) return match[(colDef.captureGroup ?? 0) + 1] ?? '';
+        return '';
+      }
+      return (issue.customColumns ?? {})[colDef.name] ?? '';
+    }
+
     // ── Filter logic ─────────────────────────────────────────────────────
     function filtersActive() {
       return filters.severities.size > 0 || filters.checkName !== '' || filters.fileName !== '' ||
@@ -380,7 +395,8 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
         }
         for (const [col, val] of Object.entries(filters.custom)) {
           if (!val) continue;
-          const colVal = (i.customColumns && i.customColumns[col]) || '';
+          const colDef = customColumnDefs.find(c => c.name === col);
+          const colVal = colDef ? getSidebarCustomValue(i, colDef) : ((i.customColumns && i.customColumns[col]) || '');
           if (!colVal.toLowerCase().includes(val.toLowerCase())) return false;
         }
         return true;
@@ -392,9 +408,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       document.getElementById('btn-filter').title = active ? 'Filters active' : 'Filter';
     }
     function rebuildCustomFilterInputs(customColumns) {
+      customColumnDefs = customColumns || [];
       const container = document.getElementById('filter-custom-cols');
       container.innerHTML = '';
-      const visible = (customColumns || []).filter(c => c.showFilter !== false);
+      const visible = customColumnDefs.filter(c => c.showFilter !== false);
       for (const col of visible) {
         const sep = document.createElement('div'); sep.className = 'dropdown-sep';
         const lbl = document.createElement('div'); lbl.className = 'filter-section-lbl';
