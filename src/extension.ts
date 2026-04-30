@@ -50,11 +50,15 @@ function resolveColumnValues(entry: PatternEntry, filePath: string): Record<stri
   return result;
 }
 
-/** Resolve configured patterns → resolved file entries with column values. */
-async function findConfiguredFiles(config: ProjectConfig | null): Promise<ResolvedFile[]> {
-  const rawPatterns: (string | PatternEntry)[] = config?.reportPatterns?.length
+function getRawPatterns(config: ProjectConfig | null): (string | PatternEntry)[] {
+  return config?.reportPatterns?.length
     ? config.reportPatterns
     : vscode.workspace.getConfiguration('codeclimateVisualiser').get<string[]>('reportPatterns', []);
+}
+
+/** Resolve configured patterns → resolved file entries with column values. */
+async function findConfiguredFiles(config: ProjectConfig | null): Promise<ResolvedFile[]> {
+  const rawPatterns = getRawPatterns(config);
 
   const results: ResolvedFile[] = [];
   for (const raw of rawPatterns) {
@@ -177,11 +181,17 @@ export function activate(context: vscode.ExtensionContext): void {
       decorationProvider.clearDecorations();
       const projectConfig = await readProjectConfig();
       issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
-      const entries = await findConfiguredFiles(projectConfig);
-      if (entries.length === 0) {
+      if (getRawPatterns(projectConfig).length === 0) {
         vscode.window.showInformationMessage(
           'No patterns configured. Create .vscode/codeclimate-visualiser.json or add ' +
           '"codeclimateVisualiser.reportPatterns" to .vscode/settings.json.',
+        );
+        return;
+      }
+      const entries = await findConfiguredFiles(projectConfig);
+      if (entries.length === 0) {
+        vscode.window.showWarningMessage(
+          'No files matched the configured patterns. Check your glob patterns and verify the files exist.',
         );
         return;
       }
@@ -190,7 +200,7 @@ export function activate(context: vscode.ExtensionContext): void {
         panel.show();
         vscode.window.showInformationMessage(`Reloaded ${loaded} report${loaded !== 1 ? 's' : ''}.`);
       } else {
-        vscode.window.showWarningMessage('No files matched the configured patterns.');
+        vscode.window.showWarningMessage('Patterns matched files but none could be loaded. Check the Output channel for details.');
       }
     }),
   );
