@@ -1,18 +1,26 @@
 import * as vscode from 'vscode';
 import { IssueManager } from './issueManager';
+import { HistorySnapshot } from './types';
 
 export class SourcesViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'codeclimateVisualiser.sourcesView';
 
   private view?: vscode.WebviewView;
+  private historySnapshots: HistorySnapshot[] = [];
 
   constructor(
     private readonly issueManager: IssueManager,
     private readonly onInit: () => Promise<void>,
     private readonly onFocusIssue: (id: string) => void,
+    private readonly onDeleteSnapshot: (id: string) => void,
     private readonly onOpenFile: (filePath: string, line: number) => Promise<void>,
   ) {
     issueManager.onChange(() => this.update());
+  }
+
+  setHistory(snapshots: HistorySnapshot[]): void {
+    this.historySnapshots = snapshots;
+    this.update();
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -37,6 +45,8 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
         this.onFocusIssue(msg.id);
       } else if (msg.type === 'openFile' && msg.path) {
         await this.onOpenFile(msg.path, msg.line ?? 1);
+      } else if (msg.type === 'deleteSnapshot' && msg.id) {
+        this.onDeleteSnapshot(msg.id);
       }
     });
 
@@ -56,7 +66,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       customColumns: i.customColumns,
     }));
     const customColumns = this.issueManager.getCustomColumns();
-    this.view.webview.postMessage({ type: 'update', files, issues, customColumns });
+    this.view.webview.postMessage({ type: 'update', files, issues, customColumns, history: this.historySnapshots });
   }
 
   private buildHtml(): string {
@@ -244,6 +254,24 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
 
     /* ── Empty state ────────────────────────── */
     #empty-msg { padding: 8px; opacity: 0.5; font-style: italic; }
+
+    /* ── History section ────────────────────── */
+    .snap-item {
+      display: flex; align-items: flex-start; padding: 4px 8px 4px 22px; gap: 4px;
+      cursor: default; flex-direction: column;
+    }
+    .snap-item:hover { background: var(--vscode-list-hoverBackground); }
+    .snap-row1 { display: flex; align-items: center; width: 100%; gap: 4px; }
+    .snap-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+    .snap-date { opacity: 0.5; font-size: 0.82em; flex-shrink: 0; }
+    .snap-total { font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .snap-delete { opacity: 0; transition: opacity 0.1s; flex-shrink: 0; }
+    .snap-item:hover .snap-delete { opacity: 0.45; }
+    .snap-item:hover .snap-delete:hover { opacity: 1; }
+    .snap-diff { display: flex; gap: 6px; font-size: 0.82em; opacity: 0.75; margin-top: 1px; }
+    .snap-diff .new  { color: #f87171; }
+    .snap-diff .fixed { color: #4ade80; }
+    .snap-empty { padding: 6px 8px 6px 22px; opacity: 0.5; font-style: italic; font-size: 0.9em; }
   </style>
 </head>
 <body>
@@ -311,6 +339,18 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
   </div>
 
   <div id="empty-msg">No reports loaded.</div>
+
+  <div id="history-section" class="section" style="display:none">
+    <div class="section-header" id="history-header">
+      <span class="arrow" id="history-arrow"></span>
+      <span class="hdr-title">History</span>
+      <span class="hdr-count" id="history-count"></span>
+      <button class="icon-btn hdr-more" id="btn-save-snapshot" title="Save Snapshot"></button>
+    </div>
+    <div class="section-body open" id="history-body">
+      <div id="history-list"></div>
+    </div>
+  </div>
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -581,14 +621,25 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     }
     wireToggle('sources-header', 'sources-body', 'sources-arrow');
     wireToggle('issues-header',  'issues-body',  'issues-arrow');
+    wireToggle('history-header', 'history-body', 'history-arrow');
+
+    // ── Save snapshot button ─────────────────────────────────────────────
+    const ICON_HISTORY = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><polyline points="8,5 8,8 10.5,10"/></svg>';
+    const ICON_SAVE    = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><polyline points="11,2 11,6 4,6"/><rect x="4" y="10" width="7" height="4" rx="0.5"/></svg>';
+    document.getElementById('btn-save-snapshot').innerHTML = ICON_SAVE;
+    document.getElementById('btn-save-snapshot').addEventListener('click', e => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.saveSnapshot' });
+    });
 
     // ── Data updates ─────────────────────────────────────────────────────
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'update') {
         rebuildCustomFilterInputs(msg.customColumns || []);
-        renderSources(msg.files  || []);
-        renderIssues (msg.issues || []);
+        renderSources(msg.files    || []);
+        renderIssues (msg.issues   || []);
+        renderHistory(msg.history  || []);
       }
     });
 
@@ -618,6 +669,85 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
         item.appendChild(rm); item.appendChild(name); item.appendChild(cnt);
         list.appendChild(item);
       }
+    }
+
+    // ── History ──────────────────────────────────────────────────────────
+    function renderHistory(snapshots) {
+      const section = document.getElementById('history-section');
+      const list    = document.getElementById('history-list');
+      const count   = document.getElementById('history-count');
+      section.style.display = '';
+      count.textContent = snapshots.length;
+      list.innerHTML = '';
+
+      if (snapshots.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'snap-empty';
+        empty.textContent = 'No snapshots yet.';
+        list.appendChild(empty);
+        return;
+      }
+
+      // Newest first
+      const sorted = [...snapshots].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+      sorted.forEach((snap, idx) => {
+        const prev = sorted[idx + 1];
+        const item = document.createElement('div');
+        item.className = 'snap-item';
+
+        // Row 1: label + date + delete
+        const row1 = document.createElement('div');
+        row1.className = 'snap-row1';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'snap-label';
+        labelSpan.title = snap.sources ? snap.sources.join(', ') : '';
+        labelSpan.textContent = snap.label || new Date(snap.timestamp).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+        const dateSpan = document.createElement('span');
+        dateSpan.className = 'snap-date';
+        if (snap.label) dateSpan.textContent = new Date(snap.timestamp).toLocaleDateString(undefined, { month:'short', day:'numeric' });
+
+        const totalSpan = document.createElement('span');
+        totalSpan.className = 'snap-total';
+        totalSpan.textContent = snap.total;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'icon-btn snap-delete'; delBtn.title = 'Delete snapshot';
+        delBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><line x1="3" y1="3" x2="11" y2="11"/><line x1="11" y1="3" x2="3" y2="11"/></svg>';
+        delBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          vscode.postMessage({ type: 'deleteSnapshot', id: snap.id });
+        });
+
+        row1.appendChild(labelSpan);
+        row1.appendChild(dateSpan);
+        row1.appendChild(totalSpan);
+        row1.appendChild(delBtn);
+        item.appendChild(row1);
+
+        // Row 2: diff vs next-older snapshot
+        if (prev) {
+          const prevSet = new Set(prev.fingerprints || []);
+          const currSet = new Set(snap.fingerprints || []);
+          const newCount  = (snap.fingerprints || []).filter(fp => !prevSet.has(fp)).length;
+          const fixedCount = (prev.fingerprints || []).filter(fp => !currSet.has(fp)).length;
+          if (newCount > 0 || fixedCount > 0) {
+            const diff = document.createElement('div');
+            diff.className = 'snap-diff';
+            if (newCount  > 0) { const s = document.createElement('span'); s.className = 'new';   s.textContent = '+' + newCount + ' new'; diff.appendChild(s); }
+            if (fixedCount > 0) { const s = document.createElement('span'); s.className = 'fixed'; s.textContent = '-' + fixedCount + ' fixed'; diff.appendChild(s); }
+            if (snap.derivedCount > 0) {
+              const w = document.createElement('span'); w.style.opacity = '0.55'; w.title = snap.derivedCount + ' issues tracked via derived fingerprint (may be inaccurate if code moved)'; w.textContent = '⚠';
+              diff.appendChild(w);
+            }
+            item.appendChild(diff);
+          }
+        }
+
+        list.appendChild(item);
+      });
     }
 
     // ── Issue item builders ──────────────────────────────────────────────

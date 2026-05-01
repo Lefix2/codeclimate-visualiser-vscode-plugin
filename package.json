@@ -120,6 +120,11 @@
         "command": "codeclimateVisualiser.reloadConfig",
         "title": "CodeClimate: Reload Config",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "codeclimateVisualiser.saveSnapshot",
+        "title": "CodeClimate: Save History Snapshot",
+        "icon": "$(history)"
       }
     ],
     "menus": {

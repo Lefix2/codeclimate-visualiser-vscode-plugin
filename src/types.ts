@@ -72,3 +72,16 @@ export interface LoadedFileInfo {
   filename: string;
   issueCount: number;
 }
+
+export interface HistorySnapshot {
+  id: string;
+  timestamp: string;
+  label?: string;
+  sources: string[];
+  counts: Record<Severity, number>;
+  total: number;
+  nativeCount: number;
+  derivedCount: number;
+  volatileCount: number;
+  fingerprints: string[];
+}

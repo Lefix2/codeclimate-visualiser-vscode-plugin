@@ -29,6 +29,8 @@ let allIssues = [];
 let allFiles = [];
 /** @type {Array<{name:string, index:number}>} */
 let customColumnDefs = [];
+/** @type {any[]} */
+let historySnapshots = [];
 
 /** @type {{severities:Set<string>, categories:Set<string>|null, quickTerms:Set<string>, sourceFiles:Set<string>, search:string, custom:Record<string,Set<string>|null>}} */
 let filters = {
@@ -174,8 +176,9 @@ function getIssueCustomValue(issue, colDef) {
 window.addEventListener('message', (event) => {
   const msg = event.data;
   if (msg.type === 'updateIssues') {
-    allIssues = msg.issues ?? [];
-    allFiles  = msg.files  ?? [];
+    allIssues        = msg.issues   ?? [];
+    allFiles         = msg.files    ?? [];
+    historySnapshots = msg.history  ?? [];
     if (msg.config) config = { ...config, ...msg.config };
     customColumnDefs = config.customColumns ?? [];
     filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
@@ -893,99 +896,185 @@ function buildTrendsView(container) {
   const view = document.createElement('div');
   view.className = 'view';
 
-  const note = document.createElement('div');
-  note.className = 'trends-note';
-  note.textContent = 'Historical trends require multiple reports loaded over time. Currently showing a snapshot breakdown of the loaded reports.';
-  view.appendChild(note);
+  const snaps = [...historySnapshots].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
-  // Per-source-file breakdown
-  /** @type {Record<string,Record<string,number>>} */
-  const bySrc = {};
-  for (const i of allIssues) {
-    const src = i.sourceFile ?? '(unknown)';
-    if (!bySrc[src]) bySrc[src] = { blocker: 0, critical: 0, major: 0, minor: 0, info: 0, total: 0 };
-    bySrc[src][(i.severity ?? 'info')]++;
-    bySrc[src].total++;
+  if (snaps.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'trends-note';
+    empty.innerHTML = 'No history yet.<br><br>Load a CodeClimate report, then click <strong>Save Snapshot</strong> in the sidebar to start tracking trends over time.';
+    view.appendChild(empty);
+    container.appendChild(view);
+    return;
   }
 
-  const sources = Object.entries(bySrc).sort((a, b) => b[1].total - a[1].total);
-
-  // KPI cards per severity
-  const counts = { blocker: 0, critical: 0, major: 0, minor: 0, info: 0 };
-  for (const i of allIssues) counts[(i.severity ?? 'info')]++;
-
-  const sevRow = document.createElement('div');
-  sevRow.className = 'row row-3col';
-  for (const sev of SEVERITY_ORDER.slice(0, 3)) {
+  // ── Line chart ──────────────────────────────────────────────────────────
+  if (snaps.length >= 2) {
+    const chartRow = document.createElement('div');
+    chartRow.className = 'row row-full';
     const card = document.createElement('div');
     card.className = 'card';
-    const badge = document.createElement('span');
-    badge.className = `sev-badge ${sev}`;
-    badge.textContent = sev;
-    const hdr = document.createElement('div');
-    hdr.className = 'card-header';
-    hdr.appendChild(badge);
-    const num = document.createElement('div');
-    num.style.cssText = `font-family:var(--font-mono);font-size:36px;font-weight:600;color:${SEVERITY_COLORS[sev]};font-variant-numeric:tabular-nums;margin-top:8px;`;
-    num.textContent = counts[sev].toLocaleString();
-    card.appendChild(hdr);
-    card.appendChild(num);
-    sevRow.appendChild(card);
+    const hdr = document.createElement('div'); hdr.className = 'card-header';
+    const t = document.createElement('div'); t.className = 'card-title'; t.textContent = 'Total Issues Over Time';
+    hdr.appendChild(t); card.appendChild(hdr);
+    card.insertAdjacentHTML('beforeend', buildTrendSvg(snaps));
+    chartRow.appendChild(card); view.appendChild(chartRow);
   }
-  view.appendChild(sevRow);
 
-  // Source breakdown
-  if (sources.length > 1) {
-    const row = document.createElement('div');
-    row.className = 'row row-full';
-    const card = document.createElement('div');
-    card.className = 'card';
-    const hdr = document.createElement('div');
-    hdr.className = 'card-header';
-    const title = document.createElement('div');
-    title.className = 'card-title';
-    title.textContent = 'Issues by Source Report';
-    hdr.appendChild(title);
-    card.appendChild(hdr);
+  // ── Latest diff KPIs ────────────────────────────────────────────────────
+  if (snaps.length >= 2) {
+    const prev = snaps[snaps.length - 2];
+    const curr = snaps[snaps.length - 1];
+    const prevSet = new Set(prev.fingerprints ?? []);
+    const currSet = new Set(curr.fingerprints ?? []);
+    const newCount      = (curr.fingerprints ?? []).filter(fp => !prevSet.has(fp)).length;
+    const fixedCount    = (prev.fingerprints ?? []).filter(fp => !currSet.has(fp)).length;
+    const persistCount  = (curr.fingerprints ?? []).filter(fp =>  prevSet.has(fp)).length;
+    const delta         = curr.total - prev.total;
 
-    for (const [src, c] of sources) {
-      const srcWrap = document.createElement('div');
-      srcWrap.style.cssText = 'margin-bottom:14px;';
-      const srcLbl = document.createElement('div');
-      srcLbl.style.cssText = 'font-family:var(--font-mono);font-size:11.5px;color:var(--fg-muted);margin-bottom:5px;display:flex;justify-content:space-between;';
-      srcLbl.innerHTML = `<span>${src}</span><span style="color:var(--fg);font-weight:600;">${c.total}</span>`;
-      const bar = document.createElement('div');
-      bar.className = 'file-bar';
-      bar.style.height = '14px';
-      for (const sev of SEVERITY_ORDER) {
-        if (!c[sev]) continue;
-        const seg = document.createElement('div');
-        seg.className = 'file-bar-seg';
-        seg.style.width = `${(c[sev] / c.total) * 100}%`;
-        seg.style.background = SEVERITY_COLORS[sev];
-        seg.title = `${sev}: ${c[sev]}`;
-        bar.appendChild(seg);
-      }
-      srcWrap.appendChild(srcLbl);
-      srcWrap.appendChild(bar);
-      card.appendChild(srcWrap);
+    const diffRow = document.createElement('div');
+    diffRow.className = 'row row-3col';
+
+    /** @param {string} label @param {number} val @param {string} color @param {string} [sub] */
+    function diffCard(label, val, color, sub) {
+      const c = document.createElement('div'); c.className = 'card';
+      const h = document.createElement('div'); h.className = 'card-header';
+      const tl = document.createElement('div'); tl.className = 'card-title'; tl.textContent = label;
+      h.appendChild(tl); c.appendChild(h);
+      const n = document.createElement('div');
+      n.style.cssText = `font-size:32px;font-weight:600;font-variant-numeric:tabular-nums;color:${color};margin-top:6px;`;
+      n.textContent = (val > 0 && color === 'var(--sev-critical)' ? '+' : '') + val.toLocaleString();
+      c.appendChild(n);
+      if (sub) { const s = document.createElement('div'); s.className = 'trends-sub'; s.textContent = sub; c.appendChild(s); }
+      return c;
     }
-    row.appendChild(card);
-    view.appendChild(row);
+    const hasDerived = (curr.derivedCount ?? 0) > 0 || (prev.derivedCount ?? 0) > 0;
+    const fpWarn = hasDerived ? ' ⚠' : '';
+    diffRow.appendChild(diffCard('New Issues',    newCount,   'var(--sev-critical)', 'vs previous snapshot' + fpWarn));
+    diffRow.appendChild(diffCard('Fixed Issues',  fixedCount, 'var(--sev-info)',     'vs previous snapshot' + fpWarn));
+    diffRow.appendChild(diffCard('Net Change',    delta,      delta > 0 ? 'var(--sev-major)' : delta < 0 ? '#4ade80' : 'var(--fg-muted)', `${persistCount} persisting`));
+    if (hasDerived) {
+      const warn = document.createElement('div'); warn.className = 'trends-note trends-warn';
+      warn.textContent = '⚠ Some issues use derived fingerprints (no native fingerprint in report). New/Fixed counts may be inaccurate if code moved between snapshots.';
+      view.appendChild(diffRow); view.appendChild(warn);
+    } else {
+      view.appendChild(diffRow);
+    }
+  } else {
+    // Single snapshot — show severity KPIs
+    const curr = snaps[0];
+    const sevRow = document.createElement('div'); sevRow.className = 'row row-3col';
+    for (const sev of SEVERITY_ORDER.slice(0, 3)) {
+      const c = document.createElement('div'); c.className = 'card';
+      const h = document.createElement('div'); h.className = 'card-header';
+      const badge = document.createElement('span'); badge.className = `sev-badge ${sev}`; badge.textContent = sev;
+      h.appendChild(badge); c.appendChild(h);
+      const n = document.createElement('div');
+      n.style.cssText = `font-size:36px;font-weight:600;font-variant-numeric:tabular-nums;color:${SEVERITY_COLORS[sev]};margin-top:8px;`;
+      n.textContent = (curr.counts?.[sev] ?? 0).toLocaleString();
+      c.appendChild(n); sevRow.appendChild(c);
+    }
+    view.appendChild(sevRow);
   }
 
-  // Minor/info breakdown
-  const row2 = document.createElement('div');
-  row2.className = 'row row-2col';
+  // ── Snapshot table ──────────────────────────────────────────────────────
+  const tableRow = document.createElement('div'); tableRow.className = 'row row-full';
+  const tableCard = document.createElement('div'); tableCard.className = 'card';
+  const tableHdr = document.createElement('div'); tableHdr.className = 'card-header';
+  const tableTitle = document.createElement('div'); tableTitle.className = 'card-title'; tableTitle.textContent = 'Snapshot History';
+  tableHdr.appendChild(tableTitle); tableCard.appendChild(tableHdr);
 
-  const minorEntries = computeTopN(allIssues, i => i.check_name ?? '—', 10);
-  row2.appendChild(buildBarCard('Top Check Names', minorEntries, '#7c5cff'));
+  const tbl = document.createElement('table'); tbl.className = 'snap-table';
+  tbl.innerHTML = '<thead><tr><th>Date</th><th>Label</th><th>Total</th><th>B</th><th>C</th><th>Maj</th><th>Min</th><th>I</th><th></th></tr></thead>';
+  const tbody = document.createElement('tbody');
 
-  const catEntries = computeTopN(allIssues, i => (i.categories ?? [])[0] ?? '—', 10);
-  row2.appendChild(buildBarCard('By Category', catEntries, '#22d3ee'));
+  [...snaps].reverse().forEach((snap, idx) => {
+    const prev = snaps[snaps.length - 1 - idx - 1];
+    const tr = document.createElement('tr');
+    const d = new Date(snap.timestamp);
+    const dateTd = document.createElement('td'); dateTd.className = 'snap-ts'; dateTd.title = d.toISOString(); dateTd.textContent = d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'2-digit' }) + ' ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
 
-  view.appendChild(row2);
+    const labelTd = document.createElement('td'); labelTd.className = 'snap-lbl-cell';
+    const labelEl = document.createElement('span'); labelEl.className = 'snap-lbl-edit'; labelEl.textContent = snap.label ?? '—'; labelEl.title = 'Click to edit label';
+    labelEl.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'text'; input.value = snap.label ?? ''; input.className = 'snap-lbl-input';
+      labelTd.replaceChild(input, labelEl); input.focus(); input.select();
+      const commit = () => {
+        vscode.postMessage({ type: 'editSnapshotLabel', id: snap.id, label: input.value });
+        labelTd.replaceChild(labelEl, input);
+        labelEl.textContent = input.value || '—';
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') labelTd.replaceChild(labelEl, input); });
+    });
+    labelTd.appendChild(labelEl);
+
+    const totalTd = document.createElement('td'); totalTd.style.cssText = 'text-align:right;font-variant-numeric:tabular-nums;font-weight:600;';
+    if (prev) {
+      const delta = snap.total - prev.total;
+      totalTd.textContent = snap.total.toLocaleString();
+      if (delta !== 0) {
+        const d2 = document.createElement('span'); d2.className = delta > 0 ? 'delta-pos' : 'delta-neg';
+        d2.textContent = ' ' + (delta > 0 ? '+' : '') + delta; totalTd.appendChild(d2);
+      }
+    } else {
+      totalTd.textContent = snap.total.toLocaleString();
+    }
+
+    const delTd = document.createElement('td');
+    const delBtn = document.createElement('button'); delBtn.className = 'snap-del-btn'; delBtn.title = 'Delete';
+    delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><polyline points="2,4 12,4"/><path d="M5,4V3h4v1"/><path d="M3,4l1,8h6l1-8"/></svg>';
+    delBtn.addEventListener('click', () => vscode.postMessage({ type: 'deleteSnapshot', id: snap.id }));
+    delTd.appendChild(delBtn);
+
+    tr.appendChild(dateTd); tr.appendChild(labelTd); tr.appendChild(totalTd);
+    for (const sev of SEVERITY_ORDER) {
+      const td = document.createElement('td');
+      td.style.cssText = `text-align:right;font-variant-numeric:tabular-nums;color:${SEVERITY_COLORS[sev]};`;
+      td.textContent = (snap.counts?.[sev] ?? 0) || '';
+      tr.appendChild(td);
+    }
+    tr.appendChild(delTd);
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody); tableCard.appendChild(tbl);
+  tableRow.appendChild(tableCard); view.appendChild(tableRow);
+
   container.appendChild(view);
+}
+
+function buildTrendSvg(snaps) {
+  const W = 560, H = 140, PL = 44, PR = 12, PT = 10, PB = 28;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const n = snaps.length;
+  const maxVal = Math.max(...snaps.map(s => s.total), 1);
+
+  /** @param {number} i */ const xOf = i => PL + (n < 2 ? cW / 2 : (i / (n - 1)) * cW);
+  /** @param {number} v */ const yOf = v => PT + cH - (v / maxVal) * cH;
+
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const y = yOf(f * maxVal); const lbl = Math.round(f * maxVal);
+    return `<line x1="${PL}" y1="${y.toFixed(1)}" x2="${W - PR}" y2="${y.toFixed(1)}" stroke="currentColor" stroke-opacity="0.08"/>
+            <text x="${PL - 4}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="currentColor" fill-opacity="0.5">${lbl}</text>`;
+  }).join('');
+
+  const totalPts = snaps.map((s, i) => `${xOf(i).toFixed(1)},${yOf(s.total).toFixed(1)}`).join(' ');
+
+  const sevLines = SEVERITY_ORDER.map(sev =>
+    `<polyline points="${snaps.map((s, i) => `${xOf(i).toFixed(1)},${yOf(s.counts?.[sev] ?? 0).toFixed(1)}`).join(' ')}" fill="none" stroke="${SEVERITY_COLORS[sev]}" stroke-width="1.2" stroke-opacity="0.5"/>`
+  ).join('');
+
+  const dots = snaps.map((s, i) =>
+    `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(s.total).toFixed(1)}" r="3" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5"><title>${s.label ?? new Date(s.timestamp).toLocaleDateString()}: ${s.total}</title></circle>`
+  ).join('');
+
+  const xLabels = [0, Math.floor(n / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i && v < n).map(i => {
+    const x = xOf(i); const lbl = new Date(snaps[i].timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+    return `<text x="${x.toFixed(1)}" y="${H - 4}" text-anchor="${anchor}" font-size="10" fill="currentColor" fill-opacity="0.5">${lbl}</text>`;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;">${gridLines}<polyline points="${totalPts}" fill="none" stroke="var(--accent)" stroke-width="2"/>${sevLines}${dots}${xLabels}</svg>`;
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────────
