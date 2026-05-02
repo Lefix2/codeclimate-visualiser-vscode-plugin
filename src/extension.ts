@@ -6,6 +6,7 @@ import { DecorationProvider } from './decorationProvider';
 import { CodeClimatePanel } from './webviewPanel';
 import { PatternEntry, ProjectConfig } from './types';
 import { SourcesViewProvider } from './sourcesViewProvider';
+import { HistoryManager } from './historyManager';
 
 const logChannel = vscode.window.createOutputChannel('CodeClimate Visualiser');
 
@@ -117,7 +118,9 @@ async function findConfiguredFiles(config: ProjectConfig | null): Promise<FindRe
 export function activate(context: vscode.ExtensionContext): void {
   const issueManager = new IssueManager();
   const decorationProvider = new DecorationProvider(issueManager);
-  const panel = new CodeClimatePanel(context, issueManager);
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const historyManager = workspaceRoot ? new HistoryManager(workspaceRoot) : null;
+  const panel = new CodeClimatePanel(context, issueManager, historyManager);
 
   async function loadFromEntries(entries: ResolvedFile[]): Promise<number> {
     let loaded = 0;
@@ -146,6 +149,11 @@ export function activate(context: vscode.ExtensionContext): void {
     issueManager,
     autoLoadFromConfig,
     (issueId) => { panel.show(); panel.focusIssue(issueId); },
+    (id: string) => {
+      historyManager?.deleteSnapshot(id);
+      sourcesView.setHistory(historyManager?.loadHistory() ?? []);
+      panel.refreshHistory();
+    },
     async (filePath, line) => {
       let resolved: string | null = null;
       if (path.isAbsolute(filePath) && fs.existsSync(filePath)) {
@@ -211,6 +219,32 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('codeclimateVisualiser.openView', async () => {
       panel.show();
       await autoLoadFromConfig();
+    }),
+
+    vscode.commands.registerCommand('codeclimateVisualiser.saveSnapshot', async () => {
+      if (!historyManager) {
+        vscode.window.showWarningMessage('Open a folder to save history snapshots.');
+        return;
+      }
+      const issues = issueManager.getAllIssues();
+      if (issues.length === 0) {
+        vscode.window.showWarningMessage('No issues loaded. Open a CodeClimate report first.');
+        return;
+      }
+      const label = await vscode.window.showInputBox({
+        prompt: 'Snapshot label (optional)',
+        placeHolder: 'e.g. v1.2.3, main@abc1234, sprint-42…',
+      });
+      if (label === undefined) return;
+      const sources = issueManager.getFileInfos().map(f => f.filename);
+      const snap = historyManager.saveSnapshot(issues, sources, label || undefined);
+      log(`Saved snapshot ${snap.id}: ${snap.total} issues`);
+      const snaps = historyManager.loadHistory();
+      sourcesView.setHistory(snaps);
+      panel.refreshHistory();
+      vscode.window.showInformationMessage(
+        `Snapshot saved: ${snap.total} issues${label ? ` (${label})` : ''}`
+      );
     }),
 
     vscode.commands.registerCommand('codeclimateVisualiser.reloadConfig', async () => {

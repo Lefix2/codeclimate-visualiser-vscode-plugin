@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { IssueManager } from './issueManager';
+import { HistoryManager } from './historyManager';
 
 export class CodeClimatePanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -10,6 +11,7 @@ export class CodeClimatePanel implements vscode.Disposable {
   constructor(
     private context: vscode.ExtensionContext,
     private issueManager: IssueManager,
+    private historyManager: HistoryManager | null,
   ) {
     this.disposables.push(issueManager.onChange(() => this.updateWebview()));
   }
@@ -45,6 +47,14 @@ export class CodeClimatePanel implements vscode.Disposable {
           case 'requestSnippet':
             this.sendSnippet(msg.issueId, msg.filePath, msg.line);
             break;
+          case 'deleteSnapshot':
+            this.historyManager?.deleteSnapshot(msg.id);
+            this.updateWebview();
+            break;
+          case 'editSnapshotLabel':
+            this.historyManager?.updateLabel(msg.id, msg.label);
+            this.updateWebview();
+            break;
         }
       },
       undefined,
@@ -79,7 +89,13 @@ export class CodeClimatePanel implements vscode.Disposable {
         showFileChart:       cfg.get<boolean>('showFileChart',       true),
         customColumns:       this.issueManager.getCustomColumns(),
       },
+      history: this.historyManager?.loadHistory() ?? [],
+      currentState: this.historyManager?.computeCurrentState(this.issueManager.getAllIssues()) ?? null,
     });
+  }
+
+  refreshHistory(): void {
+    this.updateWebview();
   }
 
   /** Resolve filePath to an existing absolute path, or null. */
@@ -237,7 +253,9 @@ export class CodeClimatePanel implements vscode.Disposable {
 type WebviewMessage =
   | { type: 'openFile'; filePath: string; line: number }
   | { type: 'removeSourceFile'; uri: string }
-  | { type: 'requestSnippet'; issueId: string; filePath: string; line: number };
+  | { type: 'requestSnippet'; issueId: string; filePath: string; line: number }
+  | { type: 'deleteSnapshot'; id: string }
+  | { type: 'editSnapshotLabel'; id: string; label: string };
 
 function getNonce(): string {
   let t = '';

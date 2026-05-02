@@ -29,6 +29,10 @@ let allIssues = [];
 let allFiles = [];
 /** @type {Array<{name:string, index:number}>} */
 let customColumnDefs = [];
+/** @type {any[]} */
+let historySnapshots = [];
+/** @type {any} */
+let currentState = null;
 
 /** @type {{severities:Set<string>, categories:Set<string>|null, quickTerms:Set<string>, sourceFiles:Set<string>, search:string, custom:Record<string,Set<string>|null>}} */
 let filters = {
@@ -174,8 +178,10 @@ function getIssueCustomValue(issue, colDef) {
 window.addEventListener('message', (event) => {
   const msg = event.data;
   if (msg.type === 'updateIssues') {
-    allIssues = msg.issues ?? [];
-    allFiles  = msg.files  ?? [];
+    allIssues        = msg.issues   ?? [];
+    allFiles         = msg.files    ?? [];
+    historySnapshots = msg.history  ?? [];
+    currentState     = msg.currentState ?? null;
     if (msg.config) config = { ...config, ...msg.config };
     customColumnDefs = config.customColumns ?? [];
     filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
@@ -254,22 +260,32 @@ function buildOverviewView(container) {
   const total = allIssues.length;
   const fileCount = new Set(allIssues.map(i => i.location?.path ?? '').filter(Boolean)).size;
 
+  // Compute deltas vs last snapshot
+  const snaps = [...historySnapshots].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const lastSnap = snaps.length > 0 ? snaps[snaps.length - 1] : null;
+  const totalDelta = lastSnap !== null ? total - lastSnap.total : null;
+  const totalSpark = snaps.length >= 2 ? [...snaps.map(s => s.total), total] : null;
+
   // KPI grid (3 large)
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'kpi-grid';
-  kpiGrid.appendChild(makeKPICard('Total Issues', total.toLocaleString(), null, null));
-  kpiGrid.appendChild(makeKPICard('Blocker',  counts.blocker,  'blocker',  '--sev-blocker'));
-  kpiGrid.appendChild(makeKPICard('Critical', counts.critical, 'critical', '--sev-critical'));
+  kpiGrid.appendChild(makeKPICard('Total Issues', total.toLocaleString(), null, null, totalDelta, totalSpark));
+  const blockerDelta = lastSnap !== null ? counts.blocker - (lastSnap.counts?.blocker ?? 0) : null;
+  const blockerSpark = snaps.length >= 2 ? [...snaps.map(s => s.counts?.blocker ?? 0), counts.blocker] : null;
+  kpiGrid.appendChild(makeKPICard('Blocker', counts.blocker, 'blocker', '--sev-blocker', blockerDelta, blockerSpark));
+  const critDelta = lastSnap !== null ? counts.critical - (lastSnap.counts?.critical ?? 0) : null;
+  const critSpark = snaps.length >= 2 ? [...snaps.map(s => s.counts?.critical ?? 0), counts.critical] : null;
+  kpiGrid.appendChild(makeKPICard('Critical', counts.critical, 'critical', '--sev-critical', critDelta, critSpark));
   view.appendChild(kpiGrid);
 
   // KPI sev row (4 small)
   const sevRow = document.createElement('div');
   sevRow.className = 'kpi-sev-row';
   const sevSmall = [
-    { label: 'Major', color: SEVERITY_COLORS.major, val: counts.major },
-    { label: 'Minor', color: SEVERITY_COLORS.minor, val: counts.minor },
-    { label: 'Info',  color: SEVERITY_COLORS.info,  val: counts.info },
-    { label: 'Files', color: 'var(--border-strong)', val: fileCount },
+    { label: 'Major', color: SEVERITY_COLORS.major, key: 'major', val: counts.major },
+    { label: 'Minor', color: SEVERITY_COLORS.minor, key: 'minor', val: counts.minor },
+    { label: 'Info',  color: SEVERITY_COLORS.info,  key: 'info',  val: counts.info },
+    { label: 'Files', color: 'var(--border-strong)', key: null,   val: fileCount },
   ];
   for (const s of sevSmall) {
     const card = document.createElement('div');
@@ -289,6 +305,14 @@ function buildOverviewView(container) {
     val.textContent = s.val.toLocaleString();
     info.appendChild(lbl);
     info.appendChild(val);
+    if (s.key && lastSnap !== null) {
+      const d = s.val - (lastSnap.counts?.[s.key] ?? 0);
+      const deltaEl = document.createElement('div');
+      const cls = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
+      deltaEl.className = `kpi-sev-delta ${cls}`;
+      deltaEl.textContent = (d > 0 ? '▲ +' : d < 0 ? '▼ ' : '— ') + d;
+      info.appendChild(deltaEl);
+    }
     card.appendChild(bar);
     card.appendChild(info);
     sevRow.appendChild(card);
@@ -349,8 +373,10 @@ function buildOverviewView(container) {
  * @param {string|number} value
  * @param {string|null} sev
  * @param {string|null} colorVar
+ * @param {number|null} [delta]
+ * @param {number[]|null} [sparkData]
  */
-function makeKPICard(label, value, sev, colorVar) {
+function makeKPICard(label, value, sev, colorVar, delta, sparkData) {
   const card = document.createElement('div');
   card.className = 'kpi';
   const lbl = document.createElement('div');
@@ -369,9 +395,42 @@ function makeKPICard(label, value, sev, colorVar) {
   if (colorVar) valEl.style.color = `var(${colorVar})`;
   valEl.textContent = String(value);
   body.appendChild(valEl);
+
+  if (delta !== null && delta !== undefined) {
+    const deltaEl = document.createElement('div');
+    const cls = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+    deltaEl.className = `kpi-delta ${cls}`;
+    const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '—';
+    deltaEl.textContent = `${arrow} ${delta > 0 ? '+' : ''}${delta} vs last snapshot`;
+    body.appendChild(deltaEl);
+  }
+
+  if (sparkData && sparkData.length >= 2) {
+    const sparkColor = colorVar ? `var(${colorVar})` : 'var(--accent)';
+    const sparkWrap = document.createElement('div');
+    sparkWrap.className = 'kpi-spark';
+    sparkWrap.innerHTML = buildSparklineSvg(sparkData, sparkColor, 72, 28);
+    body.appendChild(sparkWrap);
+  }
+
   card.appendChild(lbl);
   card.appendChild(body);
   return card;
+}
+
+/**
+ * @param {number[]} data
+ * @param {string} color
+ * @param {number} w
+ * @param {number} h
+ */
+function buildSparklineSvg(data, color, w, h) {
+  if (data.length < 2) return '';
+  const max = Math.max(...data, 1);
+  const xStep = w / (data.length - 1);
+  const pts = data.map((v, i) => `${(i * xStep).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`).join(' ');
+  const areaClose = ` ${((data.length - 1) * xStep).toFixed(1)},${h} 0,${h}`;
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;overflow:visible;"><defs><linearGradient id="spg${color.replace(/[^a-z0-9]/gi,'')}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.25"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><polygon points="${pts} ${areaClose}" fill="url(#spg${color.replace(/[^a-z0-9]/gi,'')})" stroke="none"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
 function buildDonutChart(counts, total) {
@@ -888,104 +947,274 @@ function layoutTreemap(items, width, height) {
 
 // ── Trends view ───────────────────────────────────────────────────────────────
 
+function fmtSnapDate(snap) {
+  const d = new Date(snap.timestamp);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' }) +
+    ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function buildNewFixedSvg(pts) {
+  // pts: [{new, fixed}] chronologically (snaps[0..n-1] + current)
+  if (pts.length < 2) return '';
+  const W = 560, H = 120, PL = 36, PR = 12, PT = 10, PB = 20;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const maxVal = Math.max(...pts.flatMap(p => [p.new, p.fixed]), 1);
+  const xOf = /** @param {number} i */ i => PL + (pts.length < 2 ? cW / 2 : (i / (pts.length - 1)) * cW);
+  const yOf = /** @param {number} v */ v => PT + cH - (v / maxVal) * cH;
+
+  const newPts  = pts.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.new).toFixed(1)}`).join(' ');
+  const fixPts  = pts.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.fixed).toFixed(1)}`).join(' ');
+  const newArea = newPts + ` ${xOf(pts.length-1).toFixed(1)},${(PT+cH).toFixed(1)} ${PL},${(PT+cH).toFixed(1)}`;
+  const fixArea = fixPts + ` ${xOf(pts.length-1).toFixed(1)},${(PT+cH).toFixed(1)} ${PL},${(PT+cH).toFixed(1)}`;
+
+  const gridY = [0, 0.5, 1].map(f => {
+    const y = yOf(f * maxVal); const lbl = Math.round(f * maxVal);
+    return `<line x1="${PL}" y1="${y.toFixed(1)}" x2="${W-PR}" y2="${y.toFixed(1)}" stroke="currentColor" stroke-opacity="0.07"/>
+            <text x="${PL-4}" y="${(y+4).toFixed(1)}" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.45">${lbl}</text>`;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;">
+    ${gridY}
+    <polygon points="${newArea}" fill="var(--sev-critical)" fill-opacity="0.12" stroke="none"/>
+    <polyline points="${newPts}" fill="none" stroke="var(--sev-critical)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <polygon points="${fixArea}" fill="#4ade80" fill-opacity="0.12" stroke="none"/>
+    <polyline points="${fixPts}" fill="none" stroke="#4ade80" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
 function buildTrendsView(container) {
   container.innerHTML = '';
   const view = document.createElement('div');
   view.className = 'view';
 
-  const note = document.createElement('div');
-  note.className = 'trends-note';
-  note.textContent = 'Historical trends require multiple reports loaded over time. Currently showing a snapshot breakdown of the loaded reports.';
-  view.appendChild(note);
+  const snaps = [...historySnapshots].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
-  // Per-source-file breakdown
-  /** @type {Record<string,Record<string,number>>} */
-  const bySrc = {};
-  for (const i of allIssues) {
-    const src = i.sourceFile ?? '(unknown)';
-    if (!bySrc[src]) bySrc[src] = { blocker: 0, critical: 0, major: 0, minor: 0, info: 0, total: 0 };
-    bySrc[src][(i.severity ?? 'info')]++;
-    bySrc[src].total++;
+  if (snaps.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'trends-note';
+    empty.innerHTML = 'No history yet.<br><br>Load a CodeClimate report, then click <strong>Save Snapshot</strong> in the sidebar to start tracking trends over time.';
+    view.appendChild(empty);
+    container.appendChild(view);
+    return;
   }
 
-  const sources = Object.entries(bySrc).sort((a, b) => b[1].total - a[1].total);
+  // ── Current vs last snapshot diff ───────────────────────────────────────
+  const lastSnap = snaps[snaps.length - 1];
+  const cur = currentState;
 
-  // KPI cards per severity
-  const counts = { blocker: 0, critical: 0, major: 0, minor: 0, info: 0 };
-  for (const i of allIssues) counts[(i.severity ?? 'info')]++;
+  if (cur) {
+    const lastSet = new Set(lastSnap.fingerprints ?? []);
+    const curSet  = new Set(cur.fingerprints ?? []);
+    const newCount     = cur.fingerprints.filter(fp => !lastSet.has(fp)).length;
+    const fixedCount   = (lastSnap.fingerprints ?? []).filter(fp => !curSet.has(fp)).length;
+    const persistCount = cur.fingerprints.filter(fp => lastSet.has(fp)).length;
+    const delta        = cur.total - lastSnap.total;
+    const hasDerived   = (cur.derivedCount ?? 0) > 0 || (lastSnap.derivedCount ?? 0) > 0;
 
-  const sevRow = document.createElement('div');
-  sevRow.className = 'row row-3col';
-  for (const sev of SEVERITY_ORDER.slice(0, 3)) {
-    const card = document.createElement('div');
-    card.className = 'card';
-    const badge = document.createElement('span');
-    badge.className = `sev-badge ${sev}`;
-    badge.textContent = sev;
-    const hdr = document.createElement('div');
-    hdr.className = 'card-header';
-    hdr.appendChild(badge);
-    const num = document.createElement('div');
-    num.style.cssText = `font-family:var(--font-mono);font-size:36px;font-weight:600;color:${SEVERITY_COLORS[sev]};font-variant-numeric:tabular-nums;margin-top:8px;`;
-    num.textContent = counts[sev].toLocaleString();
-    card.appendChild(hdr);
-    card.appendChild(num);
-    sevRow.appendChild(card);
-  }
-  view.appendChild(sevRow);
+    const diffRow = document.createElement('div');
+    diffRow.className = 'row row-3col';
 
-  // Source breakdown
-  if (sources.length > 1) {
-    const row = document.createElement('div');
-    row.className = 'row row-full';
-    const card = document.createElement('div');
-    card.className = 'card';
-    const hdr = document.createElement('div');
-    hdr.className = 'card-header';
-    const title = document.createElement('div');
-    title.className = 'card-title';
-    title.textContent = 'Issues by Source Report';
-    hdr.appendChild(title);
-    card.appendChild(hdr);
-
-    for (const [src, c] of sources) {
-      const srcWrap = document.createElement('div');
-      srcWrap.style.cssText = 'margin-bottom:14px;';
-      const srcLbl = document.createElement('div');
-      srcLbl.style.cssText = 'font-family:var(--font-mono);font-size:11.5px;color:var(--fg-muted);margin-bottom:5px;display:flex;justify-content:space-between;';
-      srcLbl.innerHTML = `<span>${src}</span><span style="color:var(--fg);font-weight:600;">${c.total}</span>`;
-      const bar = document.createElement('div');
-      bar.className = 'file-bar';
-      bar.style.height = '14px';
-      for (const sev of SEVERITY_ORDER) {
-        if (!c[sev]) continue;
-        const seg = document.createElement('div');
-        seg.className = 'file-bar-seg';
-        seg.style.width = `${(c[sev] / c.total) * 100}%`;
-        seg.style.background = SEVERITY_COLORS[sev];
-        seg.title = `${sev}: ${c[sev]}`;
-        bar.appendChild(seg);
+    /** @param {string} lbl @param {number} val @param {string} color @param {string} [sub] @param {string} [stripe] */
+    function trendCard(lbl, val, color, sub, stripe) {
+      const c = document.createElement('div'); c.className = 'card';
+      const inner = document.createElement('div'); inner.className = 'trend-card-stripe';
+      if (stripe) {
+        const bar = document.createElement('div'); bar.className = 'trend-card-stripe-bar'; bar.style.background = stripe;
+        inner.appendChild(bar);
       }
-      srcWrap.appendChild(srcLbl);
-      srcWrap.appendChild(bar);
-      card.appendChild(srcWrap);
+      const body = document.createElement('div'); body.style.flex = '1';
+      const h = document.createElement('div'); h.className = 'card-header';
+      const tl = document.createElement('div'); tl.className = 'card-title'; tl.textContent = lbl;
+      h.appendChild(tl); body.appendChild(h);
+      const n = document.createElement('div');
+      n.style.cssText = `font-size:32px;font-weight:600;font-variant-numeric:tabular-nums;color:${color};margin-top:6px;`;
+      n.textContent = String(val > 0 && stripe === 'var(--sev-critical)' ? '+' + val.toLocaleString() : val.toLocaleString());
+      body.appendChild(n);
+      if (sub) { const s = document.createElement('div'); s.className = 'trends-sub'; s.textContent = sub; body.appendChild(s); }
+      inner.appendChild(body);
+      c.appendChild(inner);
+      return c;
     }
-    row.appendChild(card);
-    view.appendChild(row);
+
+    const fpWarn = hasDerived ? ' ⚠' : '';
+    const netColor = delta > 0 ? 'var(--sev-major)' : delta < 0 ? '#4ade80' : 'var(--fg-muted)';
+    diffRow.appendChild(trendCard('New Issues',   newCount,   'var(--sev-critical)', 'vs last snapshot' + fpWarn, 'var(--sev-critical)'));
+    diffRow.appendChild(trendCard('Fixed Issues', fixedCount, '#4ade80',             'vs last snapshot' + fpWarn, '#4ade80'));
+    diffRow.appendChild(trendCard('Net Change',   delta,      netColor,              `${persistCount} persisting`, netColor === 'var(--fg-muted)' ? 'var(--fg-dim)' : netColor));
+    view.appendChild(diffRow);
+
+    if (hasDerived) {
+      const warn = document.createElement('div'); warn.className = 'trends-note trends-warn';
+      warn.textContent = '⚠ Some issues use derived fingerprints (no native fingerprint in report). New/Fixed counts may be inaccurate if code moved between snapshots.';
+      view.appendChild(warn);
+    }
+
+    // New vs Fixed area chart (snaps + current)
+    if (snaps.length >= 1) {
+      const nfRow = document.createElement('div'); nfRow.className = 'row row-full';
+      const nfCard = document.createElement('div'); nfCard.className = 'card';
+      const nfHdr = document.createElement('div'); nfHdr.className = 'card-header';
+      const nfTitle = document.createElement('div'); nfTitle.className = 'card-title'; nfTitle.textContent = 'New vs Fixed per Snapshot';
+      nfHdr.appendChild(nfTitle); nfCard.appendChild(nfHdr);
+
+      // Build pts: for each consecutive pair (prev→snap), compute new/fixed
+      const nfPts = [];
+      for (let i = 0; i < snaps.length; i++) {
+        const prev = i === 0 ? null : snaps[i - 1];
+        const s = snaps[i];
+        if (!prev) { nfPts.push({ new: 0, fixed: 0 }); continue; }
+        const pSet = new Set(prev.fingerprints ?? []);
+        const sSet = new Set(s.fingerprints ?? []);
+        nfPts.push({
+          new:   (s.fingerprints ?? []).filter(fp => !pSet.has(fp)).length,
+          fixed: (prev.fingerprints ?? []).filter(fp => !sSet.has(fp)).length,
+        });
+      }
+      // Last point: last snap → current
+      nfPts.push({ new: newCount, fixed: fixedCount });
+
+      const nfWrap = document.createElement('div'); nfWrap.className = 'trend-chart-area';
+      nfWrap.innerHTML = buildNewFixedSvg(nfPts);
+      const leg = document.createElement('div'); leg.className = 'nf-legend';
+      leg.innerHTML = `<span><span class="nf-legend-dot" style="background:var(--sev-critical)"></span>New</span><span><span class="nf-legend-dot" style="background:#4ade80"></span>Fixed</span>`;
+      nfCard.appendChild(nfWrap); nfCard.appendChild(leg);
+      nfRow.appendChild(nfCard); view.appendChild(nfRow);
+    }
   }
 
-  // Minor/info breakdown
-  const row2 = document.createElement('div');
-  row2.className = 'row row-2col';
+  // ── Line chart (total over time) ────────────────────────────────────────
+  if (snaps.length >= 2) {
+    const chartSnaps = cur ? [...snaps, { timestamp: new Date().toISOString(), total: cur.total, counts: cur.counts }] : snaps;
+    const chartRow = document.createElement('div'); chartRow.className = 'row row-full';
+    const card = document.createElement('div'); card.className = 'card';
+    const hdr = document.createElement('div'); hdr.className = 'card-header';
+    const t = document.createElement('div'); t.className = 'card-title'; t.textContent = 'Total Issues Over Time';
+    hdr.appendChild(t); card.appendChild(hdr);
+    card.insertAdjacentHTML('beforeend', buildTrendSvg(chartSnaps));
+    chartRow.appendChild(card); view.appendChild(chartRow);
+  }
 
-  const minorEntries = computeTopN(allIssues, i => i.check_name ?? '—', 10);
-  row2.appendChild(buildBarCard('Top Check Names', minorEntries, '#7c5cff'));
+  // ── Per-severity sparkline mini cards ───────────────────────────────────
+  if (snaps.length >= 2) {
+    const sevSparkRow = document.createElement('div');
+    sevSparkRow.className = 'kpi-sev-row';
+    for (const sev of SEVERITY_ORDER) {
+      const sparkData = [...snaps.map(s => s.counts?.[sev] ?? 0)];
+      if (cur) sparkData.push(cur.counts?.[sev] ?? 0);
+      const card = document.createElement('div'); card.className = 'kpi-sev';
+      const bar = document.createElement('div'); bar.className = 'kpi-sev-bar'; bar.style.background = SEVERITY_COLORS[sev];
+      const info = document.createElement('div'); info.className = 'kpi-sev-info';
+      const lbl = document.createElement('div'); lbl.className = 'kpi-sev-label'; lbl.style.color = SEVERITY_COLORS[sev]; lbl.textContent = sev;
+      const valNum = cur ? (cur.counts?.[sev] ?? 0) : (lastSnap.counts?.[sev] ?? 0);
+      const valEl = document.createElement('div'); valEl.className = 'kpi-sev-val'; valEl.style.color = SEVERITY_COLORS[sev]; valEl.textContent = valNum.toLocaleString();
+      info.appendChild(lbl); info.appendChild(valEl);
+      card.appendChild(bar); card.appendChild(info);
+      const sparkWrap = document.createElement('div'); sparkWrap.className = 'kpi-spark';
+      sparkWrap.innerHTML = buildSparklineSvg(sparkData, SEVERITY_COLORS[sev], 56, 24);
+      card.appendChild(sparkWrap);
+      sevSparkRow.appendChild(card);
+    }
+    view.appendChild(sevSparkRow);
+  }
 
-  const catEntries = computeTopN(allIssues, i => (i.categories ?? [])[0] ?? '—', 10);
-  row2.appendChild(buildBarCard('By Category', catEntries, '#22d3ee'));
+  // ── Snapshot table ──────────────────────────────────────────────────────
+  const tableRow = document.createElement('div'); tableRow.className = 'row row-full';
+  const tableCard = document.createElement('div'); tableCard.className = 'card';
+  const tableHdr = document.createElement('div'); tableHdr.className = 'card-header';
+  const tableTitle = document.createElement('div'); tableTitle.className = 'card-title'; tableTitle.textContent = 'Snapshot History';
+  tableHdr.appendChild(tableTitle); tableCard.appendChild(tableHdr);
 
-  view.appendChild(row2);
+  const tbl = document.createElement('table'); tbl.className = 'snap-table';
+  tbl.innerHTML = '<thead><tr><th>Date</th><th>Label</th><th>Total</th><th>B</th><th>C</th><th>Maj</th><th>Min</th><th>I</th><th></th></tr></thead>';
+  const tbody = document.createElement('tbody');
+
+  [...snaps].reverse().forEach((snap, idx) => {
+    const prev = snaps[snaps.length - 1 - idx - 1];
+    const tr = document.createElement('tr');
+    const dateTd = document.createElement('td'); dateTd.className = 'snap-ts'; dateTd.title = snap.timestamp; dateTd.textContent = fmtSnapDate(snap);
+
+    const labelTd = document.createElement('td'); labelTd.className = 'snap-lbl-cell';
+    const labelEl = document.createElement('span'); labelEl.className = 'snap-lbl-edit'; labelEl.textContent = snap.label ?? '—'; labelEl.title = 'Click to edit label';
+    labelEl.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'text'; input.value = snap.label ?? ''; input.className = 'snap-lbl-input';
+      labelTd.replaceChild(input, labelEl); input.focus(); input.select();
+      const commit = () => {
+        vscode.postMessage({ type: 'editSnapshotLabel', id: snap.id, label: input.value });
+        labelTd.replaceChild(labelEl, input);
+        labelEl.textContent = input.value || '—';
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') labelTd.replaceChild(labelEl, input); });
+    });
+    labelTd.appendChild(labelEl);
+
+    const totalTd = document.createElement('td'); totalTd.style.cssText = 'text-align:right;font-variant-numeric:tabular-nums;font-weight:600;';
+    if (prev) {
+      const d2 = snap.total - prev.total;
+      totalTd.textContent = snap.total.toLocaleString();
+      if (d2 !== 0) {
+        const sp = document.createElement('span'); sp.className = d2 > 0 ? 'delta-pos' : 'delta-neg';
+        sp.textContent = ' ' + (d2 > 0 ? '+' : '') + d2; totalTd.appendChild(sp);
+      }
+    } else {
+      totalTd.textContent = snap.total.toLocaleString();
+    }
+
+    const delTd = document.createElement('td');
+    const delBtn = document.createElement('button'); delBtn.className = 'snap-del-btn'; delBtn.title = 'Delete';
+    delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><polyline points="2,4 12,4"/><path d="M5,4V3h4v1"/><path d="M3,4l1,8h6l1-8"/></svg>';
+    delBtn.addEventListener('click', () => vscode.postMessage({ type: 'deleteSnapshot', id: snap.id }));
+    delTd.appendChild(delBtn);
+
+    tr.appendChild(dateTd); tr.appendChild(labelTd); tr.appendChild(totalTd);
+    for (const sev of SEVERITY_ORDER) {
+      const td = document.createElement('td');
+      td.style.cssText = `text-align:right;font-variant-numeric:tabular-nums;color:${SEVERITY_COLORS[sev]};`;
+      td.textContent = (snap.counts?.[sev] ?? 0) || '';
+      tr.appendChild(td);
+    }
+    tr.appendChild(delTd);
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody); tableCard.appendChild(tbl);
+  tableRow.appendChild(tableCard); view.appendChild(tableRow);
+
   container.appendChild(view);
+}
+
+function buildTrendSvg(snaps) {
+  const W = 560, H = 140, PL = 44, PR = 12, PT = 10, PB = 28;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const n = snaps.length;
+  const maxVal = Math.max(...snaps.map(s => s.total), 1);
+
+  /** @param {number} i */ const xOf = i => PL + (n < 2 ? cW / 2 : (i / (n - 1)) * cW);
+  /** @param {number} v */ const yOf = v => PT + cH - (v / maxVal) * cH;
+
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const y = yOf(f * maxVal); const lbl = Math.round(f * maxVal);
+    return `<line x1="${PL}" y1="${y.toFixed(1)}" x2="${W - PR}" y2="${y.toFixed(1)}" stroke="currentColor" stroke-opacity="0.08"/>
+            <text x="${PL - 4}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="currentColor" fill-opacity="0.5">${lbl}</text>`;
+  }).join('');
+
+  const totalPts = snaps.map((s, i) => `${xOf(i).toFixed(1)},${yOf(s.total).toFixed(1)}`).join(' ');
+
+  const sevLines = SEVERITY_ORDER.map(sev =>
+    `<polyline points="${snaps.map((s, i) => `${xOf(i).toFixed(1)},${yOf(s.counts?.[sev] ?? 0).toFixed(1)}`).join(' ')}" fill="none" stroke="${SEVERITY_COLORS[sev]}" stroke-width="1.2" stroke-opacity="0.5"/>`
+  ).join('');
+
+  const dots = snaps.map((s, i) =>
+    `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(s.total).toFixed(1)}" r="3" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5"><title>${s.label ?? new Date(s.timestamp).toLocaleDateString()}: ${s.total}</title></circle>`
+  ).join('');
+
+  const xLabels = [0, Math.floor(n / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i && v < n).map(i => {
+    const x = xOf(i); const lbl = new Date(snaps[i].timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+    return `<text x="${x.toFixed(1)}" y="${H - 4}" text-anchor="${anchor}" font-size="10" fill="currentColor" fill-opacity="0.5">${lbl}</text>`;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;">${gridLines}<polyline points="${totalPts}" fill="none" stroke="var(--accent)" stroke-width="2"/>${sevLines}${dots}${xLabels}</svg>`;
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────────
