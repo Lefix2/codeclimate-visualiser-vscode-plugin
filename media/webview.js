@@ -34,7 +34,7 @@ let historySnapshots = [];
 /** @type {any} */
 let currentState = null;
 
-/** @type {{severities:Set<string>, categories:Set<string>|null, quickTerms:Set<string>, sourceFiles:Set<string>, search:string, custom:Record<string,Set<string>|null>}} */
+/** @type {{severities:Set<string>, categories:Set<string>|null, quickTerms:Set<string>, sourceFiles:Set<string>, search:string, custom:Record<string,Set<string>|null>, newOnly:boolean}} */
 let filters = {
   severities: new Set(SEVERITY_ORDER),
   categories: null,
@@ -42,6 +42,7 @@ let filters = {
   sourceFiles: new Set(),
   search: '',
   custom: {},
+  newOnly: false,
 };
 
 let config = {
@@ -207,6 +208,7 @@ function handleFocusIssue(issueId) {
   filters.sourceFiles = new Set(allFiles.map(/** @param {any} f */ f => f.uri));
   filters.search = '';
   filters.custom = {};
+  filters.newOnly = false;
 
   expandedIds.add(issueId);
   newlyExpandedIds.add(issueId);
@@ -269,13 +271,16 @@ function buildOverviewView(container) {
   // KPI grid (3 large)
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'kpi-grid';
-  kpiGrid.appendChild(makeKPICard('Total Issues', total.toLocaleString(), null, null, totalDelta, totalSpark));
+  kpiGrid.appendChild(makeKPICard('Total Issues', total.toLocaleString(), null, null, totalDelta, totalSpark,
+    () => goToIssues({})));
   const blockerDelta = lastSnap !== null ? counts.blocker - (lastSnap.counts?.blocker ?? 0) : null;
   const blockerSpark = snaps.length >= 2 ? [...snaps.map(s => s.counts?.blocker ?? 0), counts.blocker] : null;
-  kpiGrid.appendChild(makeKPICard('Blocker', counts.blocker, 'blocker', '--sev-blocker', blockerDelta, blockerSpark));
+  kpiGrid.appendChild(makeKPICard('Blocker', counts.blocker, 'blocker', '--sev-blocker', blockerDelta, blockerSpark,
+    () => goToIssues({ severities: new Set(['blocker']) })));
   const critDelta = lastSnap !== null ? counts.critical - (lastSnap.counts?.critical ?? 0) : null;
   const critSpark = snaps.length >= 2 ? [...snaps.map(s => s.counts?.critical ?? 0), counts.critical] : null;
-  kpiGrid.appendChild(makeKPICard('Critical', counts.critical, 'critical', '--sev-critical', critDelta, critSpark));
+  kpiGrid.appendChild(makeKPICard('Critical', counts.critical, 'critical', '--sev-critical', critDelta, critSpark,
+    () => goToIssues({ severities: new Set(['critical']) })));
   view.appendChild(kpiGrid);
 
   // KPI sev row (4 small)
@@ -290,6 +295,15 @@ function buildOverviewView(container) {
   for (const s of sevSmall) {
     const card = document.createElement('div');
     card.className = 'kpi-sev';
+    if (s.key) {
+      const sevKey = s.key;
+      card.style.cursor = 'pointer';
+      card.title = `View ${s.label} issues`;
+      card.addEventListener('click', (e) => {
+        if (/** @type {HTMLElement} */(e.target).closest('.kpi-sev-delta')) return;
+        goToIssues({ severities: new Set([sevKey]) });
+      });
+    }
     const bar = document.createElement('div');
     bar.className = 'kpi-sev-bar';
     bar.style.background = s.color;
@@ -311,6 +325,17 @@ function buildOverviewView(container) {
       const cls = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
       deltaEl.className = `kpi-sev-delta ${cls}`;
       deltaEl.textContent = (d > 0 ? '▲ +' : d < 0 ? '▼ ' : '— ') + d;
+      if (d > 0 && s.key) {
+        const sevKey = s.key;
+        deltaEl.style.cursor = 'pointer';
+        deltaEl.title = `Show ${d} new ${s.label} issue${d !== 1 ? 's' : ''}`;
+        deltaEl.addEventListener('click', () => {
+          filters.severities = new Set([sevKey]);
+          filters.newOnly = true;
+          renderSeverityFilter();
+          setView('issues');
+        });
+      }
       info.appendChild(deltaEl);
     }
     card.appendChild(bar);
@@ -344,11 +369,13 @@ function buildOverviewView(container) {
 
   // Category bar
   const catEntries = computeTopN(allIssues, i => (i.categories ?? [])[0] ?? '—', 8);
-  row1.appendChild(buildBarCard('By Category', catEntries, '#22d3ee'));
+  row1.appendChild(buildBarCard('By Category', catEntries, '#22d3ee',
+    cat => () => goToIssues({ categories: cat !== '—' ? new Set([cat]) : null })));
 
   // Check name bar
   const checkEntries = computeTopN(allIssues, i => i.check_name ?? '—', 8);
-  row1.appendChild(buildBarCard('Top Check Names', checkEntries, '#7c5cff'));
+  row1.appendChild(buildBarCard('Top Check Names', checkEntries, '#7c5cff',
+    name => () => goToIssues({ quickTerms: new Set([name]) })));
 
   view.appendChild(row1);
 
@@ -357,12 +384,15 @@ function buildOverviewView(container) {
   row2.className = 'row row-2col';
 
   const fileEntries = computeTopN(allIssues, i => basename(i.location?.path ?? '—'), 10);
-  const fileCard = buildBarCard('Top Files by Issue Count', fileEntries, 'var(--accent)');
-  row2.appendChild(fileCard);
+  row2.appendChild(buildBarCard('Top Files by Issue Count', fileEntries, 'var(--accent)',
+    file => () => goToIssues({ quickTerms: new Set([file]) })));
 
   const srcEntries = computeTopN(allIssues, i => i.sourceFile ?? '—', 8);
-  const srcCard = buildBarCard('By Source Report', srcEntries, '#fb923c');
-  row2.appendChild(srcCard);
+  row2.appendChild(buildBarCard('By Source Report', srcEntries, '#fb923c',
+    src => () => {
+      const file = allFiles.find(/** @param {any} f */ f => f.filename === src);
+      goToIssues({ sourceFiles: file ? new Set([file.uri]) : undefined });
+    }));
 
   view.appendChild(row2);
   container.appendChild(view);
@@ -375,8 +405,9 @@ function buildOverviewView(container) {
  * @param {string|null} colorVar
  * @param {number|null} [delta]
  * @param {number[]|null} [sparkData]
+ * @param {(() => void)|null} [onClick]
  */
-function makeKPICard(label, value, sev, colorVar, delta, sparkData) {
+function makeKPICard(label, value, sev, colorVar, delta, sparkData, onClick) {
   const card = document.createElement('div');
   card.className = 'kpi';
   const lbl = document.createElement('div');
@@ -394,6 +425,11 @@ function makeKPICard(label, value, sev, colorVar, delta, sparkData) {
   valEl.className = 'kpi-value';
   if (colorVar) valEl.style.color = `var(${colorVar})`;
   valEl.textContent = String(value);
+  if (onClick) {
+    valEl.style.cursor = 'pointer';
+    valEl.title = 'View in issues list';
+    valEl.addEventListener('click', onClick);
+  }
   body.appendChild(valEl);
 
   if (delta !== null && delta !== undefined) {
@@ -402,6 +438,16 @@ function makeKPICard(label, value, sev, colorVar, delta, sparkData) {
     deltaEl.className = `kpi-delta ${cls}`;
     const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '—';
     deltaEl.textContent = `${arrow} ${delta > 0 ? '+' : ''}${delta} vs last snapshot`;
+    if (delta > 0) {
+      deltaEl.style.cursor = 'pointer';
+      deltaEl.title = `Show ${delta} new issue${delta !== 1 ? 's' : ''}`;
+      deltaEl.addEventListener('click', () => {
+        filters.severities = sev ? new Set([sev]) : new Set(SEVERITY_ORDER);
+        filters.newOnly = true;
+        renderSeverityFilter();
+        setView('issues');
+      });
+    }
     body.appendChild(deltaEl);
   }
 
@@ -564,8 +610,9 @@ function computeTopN(issues, keyFn, limit) {
  * @param {string} title
  * @param {Array<[string,number]>} entries
  * @param {string} color
+ * @param {((label:string) => () => void)|null} [getRowClick]
  */
-function buildBarCard(title, entries, color) {
+function buildBarCard(title, entries, color, getRowClick) {
   const card = document.createElement('div');
   card.className = 'card';
   const hdr = document.createElement('div');
@@ -574,6 +621,12 @@ function buildBarCard(title, entries, color) {
   titleEl.className = 'card-title';
   titleEl.textContent = title;
   hdr.appendChild(titleEl);
+  if (getRowClick) {
+    const action = document.createElement('div');
+    action.className = 'card-action';
+    action.textContent = 'Click row to filter →';
+    hdr.appendChild(action);
+  }
   card.appendChild(hdr);
   if (entries.length === 0) {
     const empty = document.createElement('div');
@@ -587,7 +640,11 @@ function buildBarCard(title, entries, color) {
   const max = entries.reduce((m, [, v]) => Math.max(m, v), 1);
   for (const [label, value] of entries) {
     const row = document.createElement('div');
-    row.className = 'bar-row';
+    row.className = 'bar-row' + (getRowClick ? ' clickable' : '');
+    if (getRowClick) {
+      row.addEventListener('click', getRowClick(label));
+      row.title = label;
+    }
     const lbl = document.createElement('div');
     lbl.className = 'bar-label';
     lbl.textContent = label;
@@ -636,6 +693,11 @@ function buildIssuesView(container) {
     toolbar.appendChild(countEl);
     wrap.appendChild(toolbar);
   }
+
+  // New issues qf-bar (always present when snapshots exist)
+  const newBar = document.createElement('div');
+  newBar.id = 'filter-new';
+  wrap.appendChild(newBar);
 
   // Category qf-bar
   if (config.showCategoryFilter) {
@@ -711,6 +773,7 @@ function buildIssuesView(container) {
 
   // Populate filters and table
   if (config.showSeverityFilter)  renderSeverityFilter();
+  renderNewFilter();
   if (config.showCategoryFilter)  renderCategoryFilter();
   if (config.showCheckNameFilter) renderCheckNameFilter();
   renderCustomColumnFilters();
@@ -1014,9 +1077,10 @@ function buildTrendsView(container) {
     const diffRow = document.createElement('div');
     diffRow.className = 'row row-3col';
 
-    /** @param {string} lbl @param {number} val @param {string} color @param {string} [sub] @param {string} [stripe] */
-    function trendCard(lbl, val, color, sub, stripe) {
+    /** @param {string} lbl @param {number} val @param {string} color @param {string} [sub] @param {string} [stripe] @param {(() => void)|null} [onClick] */
+    function trendCard(lbl, val, color, sub, stripe, onClick) {
       const c = document.createElement('div'); c.className = 'card';
+      if (onClick) { c.style.cursor = 'pointer'; c.title = 'View in issues list'; c.addEventListener('click', onClick); }
       const inner = document.createElement('div'); inner.className = 'trend-card-stripe';
       if (stripe) {
         const bar = document.createElement('div'); bar.className = 'trend-card-stripe-bar'; bar.style.background = stripe;
@@ -1038,7 +1102,8 @@ function buildTrendsView(container) {
 
     const fpWarn = hasDerived ? ' ⚠' : '';
     const netColor = delta > 0 ? 'var(--sev-major)' : delta < 0 ? '#4ade80' : 'var(--fg-muted)';
-    diffRow.appendChild(trendCard('New Issues',   newCount,   'var(--sev-critical)', 'vs last snapshot' + fpWarn, 'var(--sev-critical)'));
+    diffRow.appendChild(trendCard('New Issues',   newCount,   'var(--sev-critical)', 'vs last snapshot' + fpWarn, 'var(--sev-critical)',
+      newCount > 0 ? () => goToIssues({ newOnly: true }) : null));
     diffRow.appendChild(trendCard('Fixed Issues', fixedCount, '#4ade80',             'vs last snapshot' + fpWarn, '#4ade80'));
     diffRow.appendChild(trendCard('Net Change',   delta,      netColor,              `${persistCount} persisting`, netColor === 'var(--fg-muted)' ? 'var(--fg-dim)' : netColor));
     view.appendChild(diffRow);
@@ -1102,6 +1167,9 @@ function buildTrendsView(container) {
       const sparkData = [...snaps.map(s => s.counts?.[sev] ?? 0)];
       if (cur) sparkData.push(cur.counts?.[sev] ?? 0);
       const card = document.createElement('div'); card.className = 'kpi-sev';
+      const sevKey = sev;
+      card.style.cursor = 'pointer'; card.title = `View ${sev} issues`;
+      card.addEventListener('click', () => goToIssues({ severities: new Set([sevKey]) }));
       const bar = document.createElement('div'); bar.className = 'kpi-sev-bar'; bar.style.background = SEVERITY_COLORS[sev];
       const info = document.createElement('div'); info.className = 'kpi-sev-info';
       const lbl = document.createElement('div'); lbl.className = 'kpi-sev-label'; lbl.style.color = SEVERITY_COLORS[sev]; lbl.textContent = sev;
@@ -1226,6 +1294,7 @@ function parseTerms() {
 function getFiltered() {
   const typedTerms = parseTerms();
   return allIssues.filter((issue) => {
+    if (filters.newOnly && !issue.isNew)                   return false;
     if (!filters.severities.has(issue.severity ?? 'info')) return false;
     if (!filters.sourceFiles.has(issue.sourceUri))         return false;
     if (filters.categories !== null) {
@@ -1343,6 +1412,21 @@ function getSorted(issues) {
   });
 }
 
+// ── Navigation helper ─────────────────────────────────────────────────────────
+
+/** Navigate to Issues view with a clean, specific filter set. */
+function goToIssues(opts) {
+  filters.severities = opts.severities ?? new Set(SEVERITY_ORDER);
+  filters.categories = opts.categories ?? null;
+  filters.quickTerms = opts.quickTerms ?? new Set();
+  filters.search     = opts.search     ?? '';
+  filters.newOnly    = opts.newOnly    ?? false;
+  filters.sourceFiles = opts.sourceFiles !== undefined
+    ? opts.sourceFiles
+    : new Set(allFiles.map(/** @param {any} f */ f => f.uri));
+  setView('issues');
+}
+
 // ── Filter renderers ──────────────────────────────────────────────────────────
 
 function renderSeverityFilter() {
@@ -1371,10 +1455,38 @@ function renderSeverityFilter() {
         filters.severities.add(sev);
       }
       renderSeverityFilter();
+      renderActiveFilters();
       renderTable();
     });
     container.appendChild(btn);
   }
+}
+
+function renderNewFilter() {
+  const container = document.getElementById('filter-new');
+  if (!container) return;
+  container.innerHTML = '';
+  if (historySnapshots.length === 0) return;
+  const newCount = allIssues.filter(i => i.isNew).length;
+  container.className = 'qf-bar';
+  const lbl = document.createElement('span');
+  lbl.className = 'toolbar-label';
+  lbl.textContent = 'New';
+  container.appendChild(lbl);
+  const chip = document.createElement('button');
+  chip.className = 'qf-chip new-toggle' + (filters.newOnly ? ' active' : '') + (newCount === 0 ? ' disabled' : '');
+  chip.textContent = newCount > 0 ? `▲ ${newCount} new issue${newCount !== 1 ? 's' : ''}` : 'no new issues';
+  if (newCount === 0) chip.disabled = true;
+  chip.title = newCount > 0
+    ? 'Show only issues not in last snapshot'
+    : 'No new issues compared to last snapshot';
+  chip.addEventListener('click', () => {
+    filters.newOnly = !filters.newOnly;
+    renderNewFilter();
+    renderActiveFilters();
+    renderTable();
+  });
+  container.appendChild(chip);
 }
 
 function renderCategoryFilter() {
@@ -1463,6 +1575,25 @@ function renderActiveFilters() {
   const container = document.getElementById('active-filters');
   if (!container) return;
   container.innerHTML = '';
+  if (filters.newOnly) {
+    container.appendChild(makeChip('new issues', () => {
+      filters.newOnly = false;
+      renderNewFilter(); renderActiveFilters(); renderTable();
+    }));
+  }
+  if (filters.severities.size < SEVERITY_ORDER.length) {
+    for (const sev of SEVERITY_ORDER) {
+      if (!filters.severities.has(sev)) continue;
+      container.appendChild(makeChip(`sev: ${sev}`, () => {
+        if (filters.severities.size > 1) {
+          filters.severities.delete(sev);
+        } else {
+          filters.severities = new Set(SEVERITY_ORDER);
+        }
+        renderSeverityFilter(); renderActiveFilters(); renderTable();
+      }));
+    }
+  }
   if (filters.categories !== null) {
     for (const cat of filters.categories) {
       container.appendChild(makeChip('cat: ' + cat, () => toggleCategoryFilter(cat)));
@@ -1560,9 +1691,15 @@ function renderTable() {
             e.stopPropagation();
             const isIsolated = filters.severities.size === 1 && filters.severities.has(sev);
             filters.severities = isIsolated ? new Set(SEVERITY_ORDER) : new Set([sev]);
-            renderSeverityFilter(); renderTable();
+            renderSeverityFilter(); renderActiveFilters(); renderTable();
           });
           td.appendChild(badge);
+          if (issue.isNew) {
+            const nb = document.createElement('span');
+            nb.className = 'new-badge';
+            nb.textContent = 'new';
+            td.appendChild(nb);
+          }
           break;
         }
         case 'categories': {
