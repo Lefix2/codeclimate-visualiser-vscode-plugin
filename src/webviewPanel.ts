@@ -90,6 +90,7 @@ export class CodeClimatePanel implements vscode.Disposable {
         customColumns:       this.issueManager.getCustomColumns(),
       },
       history: this.historyManager?.loadHistory() ?? [],
+      currentState: this.historyManager?.computeCurrentState(this.issueManager.getAllIssues()) ?? null,
     });
   }
 

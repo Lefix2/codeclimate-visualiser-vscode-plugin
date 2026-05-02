@@ -47,6 +47,8 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
         await this.onOpenFile(msg.path, msg.line ?? 1);
       } else if (msg.type === 'deleteSnapshot' && msg.id) {
         this.onDeleteSnapshot(msg.id);
+      } else if (msg.type === 'openSourceFile' && msg.uri) {
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(msg.uri));
       }
     });
 
@@ -663,7 +665,12 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
           vscode.postMessage({ type: 'removeSource', uri: f.uri });
         });
         const name = document.createElement('span');
-        name.className = 'source-name'; name.title = f.uri; name.textContent = f.filename;
+        name.className = 'source-name'; name.title = 'Open file'; name.textContent = f.filename;
+        name.style.cursor = 'pointer';
+        name.addEventListener('click', e => {
+          e.stopPropagation();
+          vscode.postMessage({ type: 'openSourceFile', uri: f.uri });
+        });
         const cnt = document.createElement('span');
         cnt.className = 'count'; cnt.textContent = f.issueCount;
         item.appendChild(rm); item.appendChild(name); item.appendChild(cnt);

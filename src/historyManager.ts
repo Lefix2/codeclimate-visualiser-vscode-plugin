@@ -90,4 +90,23 @@ export class HistoryManager {
   updateLabel(id: string, label: string): void {
     this.rewrite(this.loadHistory().map(s => s.id === id ? { ...s, label: label || undefined } : s));
   }
+
+  computeCurrentState(issues: IssueWithSource[]): {
+    fingerprints: string[];
+    counts: Record<Severity, number>;
+    total: number;
+    derivedCount: number;
+    volatileCount: number;
+  } {
+    const counts: Record<Severity, number> = { blocker: 0, critical: 0, major: 0, minor: 0, info: 0 };
+    let derivedCount = 0, volatileCount = 0;
+    const fingerprints: string[] = [];
+    for (const issue of issues) {
+      counts[issue.severity ?? 'info']++;
+      const { fp, source } = resolveFingerprint(issue);
+      if (source === 'volatile') { volatileCount++; }
+      else { fingerprints.push(fp); if (source === 'derived') derivedCount++; }
+    }
+    return { fingerprints, counts, total: issues.length, derivedCount, volatileCount };
+  }
 }
