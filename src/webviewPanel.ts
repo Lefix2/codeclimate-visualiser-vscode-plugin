@@ -73,10 +73,23 @@ export class CodeClimatePanel implements vscode.Disposable {
   private updateWebview(): void {
     if (!this.panel) return;
     const cfg = vscode.workspace.getConfiguration('codeclimateVisualiser');
+    const rawIssues = this.issueManager.getAllIssues();
+    const history = this.historyManager?.loadHistory() ?? [];
+
+    let issues: (typeof rawIssues[0] & { isNew?: true })[] = rawIssues;
+    if (this.historyManager && history.length > 0) {
+      const sorted = [...history].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      const lastFpSet = new Set(sorted[sorted.length - 1].fingerprints);
+      issues = rawIssues.map(issue => {
+        const fp = this.historyManager!.resolveIssueFingerprint(issue);
+        return fp !== null && !lastFpSet.has(fp) ? { ...issue, isNew: true as const } : issue;
+      });
+    }
+
     this.panel.webview.postMessage({
       type: 'updateIssues',
       files: this.issueManager.getFileInfos(),
-      issues: this.issueManager.getAllIssues(),
+      issues,
       config: {
         showChartLegends:    cfg.get<boolean>('showChartLegends',    false),
         showSeverityFilter:  cfg.get<boolean>('showSeverityFilter',  true),
@@ -89,8 +102,8 @@ export class CodeClimatePanel implements vscode.Disposable {
         showFileChart:       cfg.get<boolean>('showFileChart',       true),
         customColumns:       this.issueManager.getCustomColumns(),
       },
-      history: this.historyManager?.loadHistory() ?? [],
-      currentState: this.historyManager?.computeCurrentState(this.issueManager.getAllIssues()) ?? null,
+      history,
+      currentState: this.historyManager?.computeCurrentState(rawIssues) ?? null,
     });
   }
 

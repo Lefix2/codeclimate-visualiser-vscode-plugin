@@ -91,6 +91,11 @@ export class HistoryManager {
     this.rewrite(this.loadHistory().map(s => s.id === id ? { ...s, label: label || undefined } : s));
   }
 
+  resolveIssueFingerprint(issue: IssueWithSource): string | null {
+    const { fp, source } = resolveFingerprint(issue);
+    return source === 'volatile' ? null : fp;
+  }
+
   computeCurrentState(issues: IssueWithSource[]): {
     fingerprints: string[];
     counts: Record<Severity, number>;

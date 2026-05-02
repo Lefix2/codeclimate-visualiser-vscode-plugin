@@ -4,6 +4,8 @@ src/**
 testdata/**
 out/**/*.map
 node_modules/**
+!node_modules/@vscode/codicons/dist/codicon.css
+!node_modules/@vscode/codicons/dist/codicon.ttf
 **/.gitignore
 **/.vscodeignore
 tsconfig.json

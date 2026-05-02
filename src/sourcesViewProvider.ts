@@ -9,11 +9,13 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
   private historySnapshots: HistorySnapshot[] = [];
 
   constructor(
+    private readonly extensionUri: vscode.Uri,
     private readonly issueManager: IssueManager,
     private readonly onInit: () => Promise<void>,
     private readonly onFocusIssue: (id: string) => void,
     private readonly onDeleteSnapshot: (id: string) => void,
     private readonly onOpenFile: (filePath: string, line: number) => Promise<void>,
+    private readonly historyLoader?: () => HistorySnapshot[],
   ) {
     issueManager.onChange(() => this.update());
   }
@@ -25,11 +27,22 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this.buildHtml();
+    const codiconsDistUri = vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist');
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [codiconsDistUri],
+    };
+    webviewView.webview.html = this.buildHtml(webviewView.webview);
+
+    if (this.historyLoader) {
+      this.historySnapshots = this.historyLoader();
+    }
 
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) this.update();
+      if (webviewView.visible) {
+        if (this.historyLoader) this.historySnapshots = this.historyLoader();
+        this.update();
+      }
     });
 
     webviewView.webview.onDidReceiveMessage(async (msg: {
@@ -71,13 +84,17 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     this.view.webview.postMessage({ type: 'update', files, issues, customColumns, history: this.historySnapshots });
   }
 
-  private buildHtml(): string {
+  private buildHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
+    const codiconsUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')
+    );
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+  <link rel="stylesheet" href="${codiconsUri}">
   <style>
     html, body {
       height: 100%; overflow: hidden;
@@ -143,9 +160,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       flex-shrink: 0; border-radius: 2px; line-height: 0;
     }
     .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
-    .hdr-more { opacity: 0.55; margin-left: 2px; }
-    .hdr-more:hover { opacity: 1; }
-    .hdr-more.active { opacity: 1; color: var(--vscode-button-background); }
+    .hdr-more { margin-left: 2px; }
+    .hdr-more:hover { background: var(--vscode-toolbar-hoverBackground); }
+    .hdr-more.active { color: var(--vscode-button-background); }
+    .section-header:not(.expanded) .hdr-more { display: none; }
 
     /* ── Sources list ───────────────────────── */
     .source-item { display: flex; align-items: center; height: 22px; padding: 0 8px; gap: 4px; }
@@ -274,6 +292,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     .snap-diff .new  { color: #f87171; }
     .snap-diff .fixed { color: #4ade80; }
     .snap-empty { padding: 6px 8px 6px 22px; opacity: 0.5; font-style: italic; font-size: 0.9em; }
+    #history-body { max-height: 128px; overflow-y: auto; }
   </style>
 </head>
 <body>
@@ -286,6 +305,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       <span class="arrow" id="sources-arrow"></span>
       <span class="hdr-title">Reports</span>
       <span class="hdr-count" id="sources-count"></span>
+      <button class="icon-btn hdr-more" id="btn-reload-config" title="Reload Config"><i class="codicon codicon-refresh"></i></button>
     </div>
     <div class="section-body open" id="sources-body">
       <div id="sources-list"></div>
@@ -298,9 +318,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       <span class="arrow" id="issues-arrow"></span>
       <span class="hdr-title">Issues</span>
       <span class="hdr-count" id="issues-count"></span>
-      <button class="icon-btn hdr-more" id="btn-filter" title="Filter"></button>
-      <button class="icon-btn hdr-more" id="btn-sort" title="Sort"></button>
-      <button class="icon-btn hdr-more" id="btn-more" title="View options"></button>
+      <button class="icon-btn hdr-more" id="btn-collapse-all" title="Collapse All"><i class="codicon codicon-collapse-all"></i></button>
+      <button class="icon-btn hdr-more" id="btn-filter" title="Filter"><i class="codicon codicon-filter"></i></button>
+      <button class="icon-btn hdr-more" id="btn-sort" title="Sort"><i class="codicon codicon-sort-precedence"></i></button>
+      <button class="icon-btn hdr-more" id="btn-more" title="View options"><i class="codicon codicon-ellipsis"></i></button>
     </div>
     <div class="section-body-flex open" id="issues-body">
       <div id="issues-list"></div>
@@ -343,11 +364,11 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
   <div id="empty-msg">No reports loaded.</div>
 
   <div id="history-section" class="section" style="display:none">
-    <div class="section-header" id="history-header">
+    <div class="section-header expanded" id="history-header">
       <span class="arrow" id="history-arrow"></span>
       <span class="hdr-title">History</span>
       <span class="hdr-count" id="history-count"></span>
-      <button class="icon-btn hdr-more" id="btn-save-snapshot" title="Save Snapshot"></button>
+      <button class="icon-btn hdr-more" id="btn-save-snapshot" title="Save Snapshot"><i class="codicon codicon-tag"></i></button>
     </div>
     <div class="section-body open" id="history-body">
       <div id="history-list"></div>
@@ -365,21 +386,14 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     let filters = { severities: new Set(), checkName: '', fileName: '', custom: {} };
     let customColumnDefs = [];  // CustomColumn[] from last update
 
-    // ── SVG icons ────────────────────────────────────────────────────────
+    // ── SVG icons (tree only — header buttons use codicons) ──────────────
     const ICONS = {
-      chevronRight: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="5.5,3 10.5,8 5.5,13"/></svg>',
-      chevronDown:  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,5.5 8,10.5 13,5.5"/></svg>',
-      close:        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>',
-      focusTable:   '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="6" y1="3" x2="6" y2="13"/></svg>',
-      filter:       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,3 14,3 9,9 9,14 7,14 7,9"/></svg>',
-      sort:         '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="10" y2="4"/><line x1="2" y1="8" x2="7" y2="8"/><line x1="2" y1="12" x2="5" y2="12"/><polyline points="12,2 12,14"/><polyline points="9,11 12,14 15,11"/></svg>',
-      ellipsis:     '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/></svg>',
-      folder:       '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4C1.5 3.45 1.95 3 2.5 3H5.5L7 4.5H11.5C12.05 4.5 12.5 4.95 12.5 5.5V10.5C12.5 11.05 12.05 11.5 11.5 11.5H2.5C1.95 11.5 1.5 11.05 1.5 10.5V4z"/></svg>',
+      chevronRight: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5.5,3 10.5,8 5.5,13"/></svg>',
+      chevronDown:  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,5.5 8,10.5 13,5.5"/></svg>',
+      close:        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>',
+      focusTable:   '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="6" y1="3" x2="6" y2="13"/></svg>',
+      folder:       '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4C1.5 3.45 1.95 3 2.5 3H5.5L7 4.5H11.5C12.05 4.5 12.5 4.95 12.5 5.5V10.5C12.5 11.05 12.05 11.5 11.5 11.5H2.5C1.95 11.5 1.5 11.05 1.5 10.5V4z"/></svg>',
     };
-
-    document.getElementById('btn-filter').innerHTML = ICONS.filter;
-    document.getElementById('btn-sort').innerHTML   = ICONS.sort;
-    document.getElementById('btn-more').innerHTML   = ICONS.ellipsis;
 
     // ── Helpers ──────────────────────────────────────────────────────────
     function maxSev(issues) {
@@ -614,7 +628,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       const hdr   = document.getElementById(headerId);
       const body  = document.getElementById(bodyId);
       const arrow = document.getElementById(arrowId);
-      if (arrow) arrow.innerHTML = ICONS.chevronDown;
+      if (arrow) arrow.innerHTML = hdr.classList.contains('expanded') ? ICONS.chevronDown : ICONS.chevronRight;
       hdr.addEventListener('click', () => {
         const open = hdr.classList.toggle('expanded');
         body.classList.toggle('open', open);
@@ -625,13 +639,28 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     wireToggle('issues-header',  'issues-body',  'issues-arrow');
     wireToggle('history-header', 'history-body', 'history-arrow');
 
+    // ── Reload config button ────────────────────────────────────────────
+    document.getElementById('btn-reload-config').addEventListener('click', e => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.reloadConfig' });
+    });
+
     // ── Save snapshot button ─────────────────────────────────────────────
-    const ICON_HISTORY = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><polyline points="8,5 8,8 10.5,10"/></svg>';
-    const ICON_SAVE    = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><polyline points="11,2 11,6 4,6"/><rect x="4" y="10" width="7" height="4" rx="0.5"/></svg>';
-    document.getElementById('btn-save-snapshot').innerHTML = ICON_SAVE;
     document.getElementById('btn-save-snapshot').addEventListener('click', e => {
       e.stopPropagation();
       vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.saveSnapshot' });
+    });
+
+    // ── Collapse all button ───────────────────────────────────────────────
+    document.getElementById('btn-collapse-all').addEventListener('click', e => {
+      e.stopPropagation();
+      const list = document.getElementById('issues-list');
+      list.querySelectorAll('.file-group-hdr.expanded, .tree-node-hdr.expanded').forEach(hdr => {
+        hdr.classList.remove('expanded');
+        const arrow = hdr.querySelector('.arrow');
+        if (arrow) arrow.innerHTML = ICONS.chevronRight;
+      });
+      list.querySelectorAll('.file-group-body.open').forEach(body => body.classList.remove('open'));
     });
 
     // ── Data updates ─────────────────────────────────────────────────────

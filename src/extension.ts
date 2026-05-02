@@ -146,6 +146,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   const sourcesView = new SourcesViewProvider(
+    context.extensionUri,
     issueManager,
     autoLoadFromConfig,
     (issueId) => { panel.show(); panel.focusIssue(issueId); },
@@ -181,6 +182,7 @@ export function activate(context: vscode.ExtensionContext): void {
       editor.selection = new vscode.Selection(pos, pos);
       editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
     },
+    () => historyManager?.loadHistory() ?? [],
   );
   context.subscriptions.push(decorationProvider, panel, logChannel,
     vscode.window.registerWebviewViewProvider(SourcesViewProvider.viewId, sourcesView));

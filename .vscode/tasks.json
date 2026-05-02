@@ -2,16 +2,27 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "npm: compile",
       "type": "npm",
       "script": "compile",
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "presentation": {
-        "reveal": "silent"
-      },
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "silent" },
       "problemMatcher": "$tsc"
+    },
+    {
+      "label": "Seed test snapshots",
+      "type": "shell",
+      "command": "node scripts/gen-test-snapshots.js",
+      "presentation": { "reveal": "silent", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build & seed history",
+      "dependsOrder": "sequence",
+      "dependsOn": ["npm: compile", "Seed test snapshots"],
+      "group": { "kind": "build", "isDefault": false },
+      "presentation": { "reveal": "silent" },
+      "problemMatcher": []
     }
   ]
 }
