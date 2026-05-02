@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { IssueManager } from './issueManager';
+import { HistoryManager } from './historyManager';
 
 export class CodeClimatePanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -10,6 +11,7 @@ export class CodeClimatePanel implements vscode.Disposable {
   constructor(
     private context: vscode.ExtensionContext,
     private issueManager: IssueManager,
+    private historyManager: HistoryManager | null,
   ) {
     this.disposables.push(issueManager.onChange(() => this.updateWebview()));
   }
@@ -31,6 +33,7 @@ export class CodeClimatePanel implements vscode.Disposable {
         retainContextWhenHidden: true,
       },
     );
+    this.panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'icon.svg');
 
     this.panel.webview.onDidReceiveMessage(
       async (msg: WebviewMessage) => {
@@ -43,6 +46,14 @@ export class CodeClimatePanel implements vscode.Disposable {
             break;
           case 'requestSnippet':
             this.sendSnippet(msg.issueId, msg.filePath, msg.line);
+            break;
+          case 'deleteSnapshot':
+            this.historyManager?.deleteSnapshot(msg.id);
+            this.updateWebview();
+            break;
+          case 'editSnapshotLabel':
+            this.historyManager?.updateLabel(msg.id, msg.label);
+            this.updateWebview();
             break;
         }
       },
@@ -62,10 +73,23 @@ export class CodeClimatePanel implements vscode.Disposable {
   private updateWebview(): void {
     if (!this.panel) return;
     const cfg = vscode.workspace.getConfiguration('codeclimateVisualiser');
+    const rawIssues = this.issueManager.getAllIssues();
+    const history = this.historyManager?.loadHistory() ?? [];
+
+    let issues: (typeof rawIssues[0] & { isNew?: true })[] = rawIssues;
+    if (this.historyManager && history.length > 0) {
+      const sorted = [...history].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      const lastFpSet = new Set(sorted[sorted.length - 1].fingerprints);
+      issues = rawIssues.map(issue => {
+        const fp = this.historyManager!.resolveIssueFingerprint(issue);
+        return fp !== null && !lastFpSet.has(fp) ? { ...issue, isNew: true as const } : issue;
+      });
+    }
+
     this.panel.webview.postMessage({
       type: 'updateIssues',
       files: this.issueManager.getFileInfos(),
-      issues: this.issueManager.getAllIssues(),
+      issues,
       config: {
         showChartLegends:    cfg.get<boolean>('showChartLegends',    false),
         showSeverityFilter:  cfg.get<boolean>('showSeverityFilter',  true),
@@ -78,7 +102,13 @@ export class CodeClimatePanel implements vscode.Disposable {
         showFileChart:       cfg.get<boolean>('showFileChart',       true),
         customColumns:       this.issueManager.getCustomColumns(),
       },
+      history,
+      currentState: this.historyManager?.computeCurrentState(rawIssues) ?? null,
     });
+  }
+
+  refreshHistory(): void {
+    this.updateWebview();
   }
 
   /** Resolve filePath to an existing absolute path, or null. */
@@ -152,39 +182,62 @@ export class CodeClimatePanel implements vscode.Disposable {
          or right-click a <code>.json</code> file in the explorer.</p>
     </div>
 
-    <div id="main-content" style="display:none">
-      <div id="charts-row">
-        <div class="chart-card" id="card-severity"><h3>By Severity</h3><canvas id="chart-severity"></canvas></div>
-        <div class="chart-card" id="card-category"><h3>By Category</h3><canvas id="chart-category"></canvas></div>
-        <div class="chart-card" id="card-checkname"><h3>Top Check Names</h3><canvas id="chart-checkname"></canvas></div>
-        <div class="chart-card" id="card-source"><h3>By Source</h3><canvas id="chart-source"></canvas></div>
-        <div class="chart-card" id="card-file"><h3>Top Files</h3><canvas id="chart-file"></canvas></div>
+    <div id="dashboard" style="display:none">
+      <div class="dash-header">
+        <div class="dash-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1"    y="4"  width="3" height="18" rx="1" fill="#c084fc"/>
+            <rect x="5.5"  y="8"  width="3" height="14" rx="1" fill="#f87171"/>
+            <rect x="10"   y="11" width="3" height="11" rx="1" fill="#fb923c"/>
+            <rect x="14.5" y="15" width="3" height="7"  rx="1" fill="#fbbf24"/>
+            <rect x="19"   y="19" width="3" height="3"  rx="1" fill="#71717a"/>
+          </svg>
+        </div>
+        <div class="dash-title-wrap">
+          <div class="dash-title">CodeClimate Visualiser</div>
+          <div class="dash-sub" id="dash-subtitle">Loading…</div>
+        </div>
       </div>
 
-      <div id="filters">
-        <div id="filter-severity"></div>
-        <div id="filter-categories"></div>
-        <div id="filter-checknames"></div>
-        <div id="filter-custom"></div>
-      </div>
-      <div id="search-row">
-        <input type="text" id="filter-search" placeholder="Filter by description, file, check name, category… use ; to AND terms">
-      </div>
-      <div id="active-filters"></div>
+      <nav class="dash-nav" id="dash-nav">
+        <button class="dash-nav-tab active" data-view="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/>
+            <rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>
+          </svg>
+          Overview
+        </button>
+        <button class="dash-nav-tab" data-view="issues">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+          </svg>
+          Issues
+        </button>
+        <button class="dash-nav-tab" data-view="files">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5a2 2 0 0 1 2-2h6l2 3h4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>
+          </svg>
+          Files
+        </button>
+        <button class="dash-nav-tab" data-view="treemap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="9" height="11"/><rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="9" height="5"/>
+          </svg>
+          Treemap
+        </button>
+        <button class="dash-nav-tab" data-view="trends">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/>
+          </svg>
+          Trends
+        </button>
+      </nav>
 
-      <div id="issues-count-bar"></div>
-
-      <div id="table-container">
-        <table id="issues-table">
-          <thead id="issues-thead"></thead>
-          <tbody id="issues-tbody"></tbody>
-        </table>
-        <div id="table-footer"></div>
-      </div>
+      <div id="view-container"></div>
     </div>
   </div>
 
-  <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script nonce="${nonce}">window.Prism = window.Prism || {}; window.Prism.manual = true;</script>
   <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
   <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-ruby.min.js"></script>
@@ -213,7 +266,9 @@ export class CodeClimatePanel implements vscode.Disposable {
 type WebviewMessage =
   | { type: 'openFile'; filePath: string; line: number }
   | { type: 'removeSourceFile'; uri: string }
-  | { type: 'requestSnippet'; issueId: string; filePath: string; line: number };
+  | { type: 'requestSnippet'; issueId: string; filePath: string; line: number }
+  | { type: 'deleteSnapshot'; id: string }
+  | { type: 'editSnapshotLabel'; id: string; label: string };
 
 function getNonce(): string {
   let t = '';

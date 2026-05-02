@@ -6,6 +6,7 @@ import { DecorationProvider } from './decorationProvider';
 import { CodeClimatePanel } from './webviewPanel';
 import { PatternEntry, ProjectConfig } from './types';
 import { SourcesViewProvider } from './sourcesViewProvider';
+import { HistoryManager } from './historyManager';
 
 const logChannel = vscode.window.createOutputChannel('CodeClimate Visualiser');
 
@@ -50,33 +51,76 @@ function resolveColumnValues(entry: PatternEntry, filePath: string): Record<stri
   return result;
 }
 
-/** Resolve configured patterns → resolved file entries with column values. */
-async function findConfiguredFiles(config: ProjectConfig | null): Promise<ResolvedFile[]> {
-  const rawPatterns: (string | PatternEntry)[] = config?.reportPatterns?.length
+function getRawPatterns(config: ProjectConfig | null): (string | PatternEntry)[] {
+  return config?.reportPatterns?.length
     ? config.reportPatterns
     : vscode.workspace.getConfiguration('codeclimateVisualiser').get<string[]>('reportPatterns', []);
+}
 
-  const results: ResolvedFile[] = [];
+type PatternErrorKind = 'invalidRegex' | 'fileNotFound' | 'noFilesMatched';
+
+interface PatternError {
+  kind: PatternErrorKind;
+  pattern: string;
+  detail?: string;
+}
+
+interface FindResult {
+  entries: ResolvedFile[];
+  errors: PatternError[];
+}
+
+/** Resolve configured patterns → resolved file entries with column values, plus per-pattern errors. */
+async function findConfiguredFiles(config: ProjectConfig | null): Promise<FindResult> {
+  const rawPatterns = getRawPatterns(config);
+  const entries: ResolvedFile[] = [];
+  const errors: PatternError[] = [];
+
   for (const raw of rawPatterns) {
     const entry: PatternEntry = typeof raw === 'string' ? { glob: raw } : raw;
+
+    if (entry.regex) {
+      try {
+        new RegExp(entry.regex);
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        log(`Invalid regex "${entry.regex}" in pattern "${entry.glob}": ${detail}`);
+        errors.push({ kind: 'invalidRegex', pattern: entry.glob, detail });
+        continue;
+      }
+    }
+
     let uris: vscode.Uri[];
     if (path.isAbsolute(entry.glob)) {
+      if (!fs.existsSync(entry.glob)) {
+        log(`File not found: ${entry.glob}`);
+        errors.push({ kind: 'fileNotFound', pattern: entry.glob });
+        continue;
+      }
       uris = [vscode.Uri.file(entry.glob)];
     } else {
       uris = await vscode.workspace.findFiles(entry.glob);
+      if (uris.length === 0) {
+        log(`Pattern "${entry.glob}" matched no files`);
+        errors.push({ kind: 'noFilesMatched', pattern: entry.glob });
+        continue;
+      }
     }
+
     log(`Pattern "${entry.glob}" matched ${uris.length} file(s)`);
     for (const uri of uris) {
-      results.push({ uri, columnValues: resolveColumnValues(entry, uri.fsPath) });
+      entries.push({ uri, columnValues: resolveColumnValues(entry, uri.fsPath) });
     }
   }
-  return results;
+  return { entries, errors };
 }
 
 export function activate(context: vscode.ExtensionContext): void {
   const issueManager = new IssueManager();
   const decorationProvider = new DecorationProvider(issueManager);
-  const panel = new CodeClimatePanel(context, issueManager);
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const historyManager = workspaceRoot ? new HistoryManager(workspaceRoot) : null;
+  const panel = new CodeClimatePanel(context, issueManager, historyManager);
 
   async function loadFromEntries(entries: ResolvedFile[]): Promise<number> {
     let loaded = 0;
@@ -97,14 +141,20 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!issueManager.isEmpty) return;
     const projectConfig = await readProjectConfig();
     issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
-    const entries = await findConfiguredFiles(projectConfig);
+    const { entries } = await findConfiguredFiles(projectConfig);
     await loadFromEntries(entries);
   }
 
   const sourcesView = new SourcesViewProvider(
+    context.extensionUri,
     issueManager,
     autoLoadFromConfig,
     (issueId) => { panel.show(); panel.focusIssue(issueId); },
+    (id: string) => {
+      historyManager?.deleteSnapshot(id);
+      sourcesView.setHistory(historyManager?.loadHistory() ?? []);
+      panel.refreshHistory();
+    },
     async (filePath, line) => {
       let resolved: string | null = null;
       if (path.isAbsolute(filePath) && fs.existsSync(filePath)) {
@@ -132,6 +182,7 @@ export function activate(context: vscode.ExtensionContext): void {
       editor.selection = new vscode.Selection(pos, pos);
       editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
     },
+    () => historyManager?.loadHistory() ?? [],
   );
   context.subscriptions.push(decorationProvider, panel, logChannel,
     vscode.window.registerWebviewViewProvider(SourcesViewProvider.viewId, sourcesView));
@@ -172,25 +223,63 @@ export function activate(context: vscode.ExtensionContext): void {
       await autoLoadFromConfig();
     }),
 
+    vscode.commands.registerCommand('codeclimateVisualiser.saveSnapshot', async () => {
+      if (!historyManager) {
+        vscode.window.showWarningMessage('Open a folder to save history snapshots.');
+        return;
+      }
+      const issues = issueManager.getAllIssues();
+      if (issues.length === 0) {
+        vscode.window.showWarningMessage('No issues loaded. Open a CodeClimate report first.');
+        return;
+      }
+      const label = await vscode.window.showInputBox({
+        prompt: 'Snapshot label (optional)',
+        placeHolder: 'e.g. v1.2.3, main@abc1234, sprint-42…',
+      });
+      if (label === undefined) return;
+      const sources = issueManager.getFileInfos().map(f => f.filename);
+      const snap = historyManager.saveSnapshot(issues, sources, label || undefined);
+      log(`Saved snapshot ${snap.id}: ${snap.total} issues`);
+      const snaps = historyManager.loadHistory();
+      sourcesView.setHistory(snaps);
+      panel.refreshHistory();
+      vscode.window.showInformationMessage(
+        `Snapshot saved: ${snap.total} issues${label ? ` (${label})` : ''}`
+      );
+    }),
+
     vscode.commands.registerCommand('codeclimateVisualiser.reloadConfig', async () => {
       issueManager.clearAll();
       decorationProvider.clearDecorations();
       const projectConfig = await readProjectConfig();
       issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
-      const entries = await findConfiguredFiles(projectConfig);
-      if (entries.length === 0) {
+      if (getRawPatterns(projectConfig).length === 0) {
         vscode.window.showInformationMessage(
           'No patterns configured. Create .vscode/codeclimate-visualiser.json or add ' +
           '"codeclimateVisualiser.reportPatterns" to .vscode/settings.json.',
         );
         return;
       }
+      const { entries, errors } = await findConfiguredFiles(projectConfig);
+      for (const err of errors) {
+        if (err.kind === 'invalidRegex') {
+          vscode.window.showErrorMessage(
+            `Invalid regex in pattern "${err.pattern}": ${err.detail ?? 'syntax error'}`,
+          );
+        } else if (err.kind === 'fileNotFound') {
+          vscode.window.showWarningMessage(`File not found: ${err.pattern}`);
+        } else {
+          vscode.window.showWarningMessage(
+            `No files matched pattern "${err.pattern}". Check the glob and verify the files exist.`,
+          );
+        }
+      }
+      if (entries.length === 0) return;
       const loaded = await loadFromEntries(entries);
       if (loaded > 0) {
         panel.show();
         vscode.window.showInformationMessage(`Reloaded ${loaded} report${loaded !== 1 ? 's' : ''}.`);
-      } else {
-        vscode.window.showWarningMessage('No files matched the configured patterns.');
       }
     }),
   );

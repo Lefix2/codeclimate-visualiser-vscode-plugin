@@ -3,22 +3,24 @@
     {
       "name": "outil",
       "index": 0,
-      "showChart": false,
-      "showQuickFilter": true
-    },
-    {
-      "name": "sous-système",
-      "index": 2,
       "showChart": true,
       "showQuickFilter": true,
+      "showFilter": true
+    },
+    {
+      "name": "package",
+      "index": 1,
+      "showChart": true,
+      "showQuickFilter": true,
+      "showFilter": true,
       "fromField": "location.path",
-      "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
+      "fieldRegex": "src/([^/]+)/.*"
     }
   ],
   "reportPatterns": [
     {
-      "glob": "reports/*-*.json",
-      "regex": "(\\w+)-(\\w+)\\.json",
+      "glob": "reports/*.json",
+      "regex": "(\\w+)-.*\\.json",
       "values": {
         "outil": "$0"
       }

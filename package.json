@@ -120,6 +120,11 @@
         "command": "codeclimateVisualiser.reloadConfig",
         "title": "CodeClimate: Reload Config",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "codeclimateVisualiser.saveSnapshot",
+        "title": "CodeClimate: Save History Snapshot",
+        "icon": "$(history)"
       }
     ],
     "menus": {
@@ -148,15 +153,24 @@
     "publish": "vsce publish"
   },
   "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^12.0.6",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.1",
     "mocha": "^10.4.0",
+    "semantic-release": "^25.0.3",
     "tsx": "^4.21.0",
     "typescript": "^5.3.0"
   },
   "overrides": {
     "undici": "5"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.45"
   }
 }
