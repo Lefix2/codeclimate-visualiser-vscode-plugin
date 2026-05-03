@@ -9,7 +9,7 @@ Visualise [CodeClimate](https://codeclimate.com/) JSON and NDJSON reports direct
 
 ## Overview
 
-![Overview — KPI cards, severity breakdown, category and check name charts](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/media/screenshots/overview.png)
+![Overview — KPI cards, severity breakdown, category and check name charts](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/docs/screenshots/overview.png)
 
 The **Overview** tab shows at a glance:
 
@@ -21,7 +21,7 @@ The **Overview** tab shows at a glance:
 
 ## Issues Table
 
-![Filterable issue table with severity, category, tool and search filters](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/media/screenshots/issue-list.png)
+![Filterable issue table with severity, category, tool and search filters](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/docs/screenshots/issue-list.png)
 
 The **Issues** tab provides a fully filterable table:
 
@@ -34,7 +34,7 @@ The **Issues** tab provides a fully filterable table:
 
 ## Inline Decorations & Sidebar
 
-![Sidebar with issues list and inline editor decorations](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/media/screenshots/embedded-view.png)
+![Sidebar with issues list and inline editor decorations](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/docs/screenshots/embedded-view.png)
 
 - **Sidebar panel** lists issues grouped by file, with severity dots and one-click navigation
 - **Inline decorations** colour the gutter and show a hover tooltip with the issue description and source report
@@ -44,7 +44,7 @@ The **Issues** tab provides a fully filterable table:
 
 ## History & Trends
 
-![Trends view — new vs fixed chart, total over time, per-severity sparklines](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/media/screenshots/trends.png)
+![Trends view — new vs fixed chart, total over time, per-severity sparklines](https://raw.githubusercontent.com/Lefix2/codeclimate-visualiser-vscode-plugin/main/docs/screenshots/trends.png)
 
 Save a **snapshot** at any point (tag icon in the History section). The **Trends** tab then shows:
 
