@@ -11,3 +11,5 @@ node_modules/**
 tsconfig.json
 *.vsix
 .claude/**
+tmp_for_claude/**
+media/icon-color.svg

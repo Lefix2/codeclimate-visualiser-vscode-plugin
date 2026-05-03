@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to package (e.g. 1.2.3) — defaults to package.json'
+        description: 'Version to package (e.g. 1.2.3) — defaults to latest git tag'
         required: false
       publish:
         description: 'Publish to VS Code Marketplace'
@@ -25,6 +25,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -34,13 +36,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Sync version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
-
-      - name: Sync version from input
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
-        run: npm version --no-git-tag-version "${{ github.event.inputs.version }}"
+      - name: Sync version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            npm version --no-git-tag-version "${{ github.event.inputs.version }}"
+          else
+            LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | head -1)
+            [[ -n "$LATEST" ]] && npm version --no-git-tag-version "${LATEST#v}"
+          fi
 
       - name: Compile TypeScript
         run: npm run compile
