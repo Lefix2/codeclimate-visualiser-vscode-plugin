@@ -13,3 +13,4 @@ tsconfig.json
 .claude/**
 tmp_for_claude/**
 media/icon-color.svg
+media/screenshots/
