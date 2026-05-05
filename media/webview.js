@@ -1016,6 +1016,53 @@ function fmtSnapDate(snap) {
     ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
+// ── Chart hover tooltip ───────────────────────────────────────────────────────
+function getChartTooltip() {
+  let tip = document.getElementById('chart-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'chart-tip';
+    tip.style.cssText = [
+      'position:fixed', 'pointer-events:none', 'display:none',
+      'background:var(--vscode-editorWidget-background,var(--bg))',
+      'border:1px solid var(--border)', 'border-radius:6px',
+      'padding:7px 11px', 'font-size:11px', 'line-height:1.65',
+      'box-shadow:0 4px 20px rgba(0,0,0,0.55)', 'z-index:9999',
+      'min-width:130px',
+    ].join(';');
+    document.body.appendChild(tip);
+  }
+  return tip;
+}
+
+/** @param {HTMLElement} wrapEl @param {number} n @param {number} svgW @param {number} PL @param {number} PR @param {(idx:number)=>string} getContent */
+function wireChartHover(wrapEl, n, svgW, PL, PR, getContent) {
+  const tip = getChartTooltip();
+  wrapEl.style.position = 'relative';
+  const ch = document.createElement('div');
+  ch.style.cssText = 'position:absolute;top:8px;bottom:0;width:1px;background:currentColor;opacity:0.18;pointer-events:none;display:none;';
+  wrapEl.appendChild(ch);
+
+  wrapEl.addEventListener('mousemove', e => {
+    const rect = wrapEl.getBoundingClientRect();
+    const scale = rect.width / svgW;
+    const relX = (e.clientX - rect.left) / scale;
+    const frac = Math.max(0, Math.min(1, (relX - PL) / (svgW - PL - PR)));
+    const idx = Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+    ch.style.left = ((PL + frac * (svgW - PL - PR)) * scale).toFixed(1) + 'px';
+    ch.style.display = 'block';
+    tip.innerHTML = getContent(idx);
+    tip.style.display = 'block';
+    tip.style.left = (e.clientX + 14) + 'px';
+    tip.style.top  = (e.clientY - 8) + 'px';
+    requestAnimationFrame(() => {
+      if (e.clientX + 14 + tip.offsetWidth  > window.innerWidth  - 8) tip.style.left = (e.clientX - tip.offsetWidth  - 14) + 'px';
+      if (e.clientY - 8  + tip.offsetHeight > window.innerHeight - 8) tip.style.top  = (e.clientY - tip.offsetHeight - 8)  + 'px';
+    });
+  });
+  wrapEl.addEventListener('mouseleave', () => { tip.style.display = 'none'; ch.style.display = 'none'; });
+}
+
 function buildNewFixedSvg(pts) {
   // pts: [{new, fixed}] chronologically (snaps[0..n-1] + current)
   if (pts.length < 2) return '';
@@ -1140,6 +1187,13 @@ function buildTrendsView(container) {
 
       const nfWrap = document.createElement('div'); nfWrap.className = 'trend-chart-area';
       nfWrap.innerHTML = buildNewFixedSvg(nfPts);
+      const nfLabels = [...snaps.map(s => s.label ? `${s.label} · ${fmtSnapDate(s)}` : fmtSnapDate(s)), 'Current'];
+      wireChartHover(nfWrap, nfPts.length, 560, 36, 12, idx => {
+        const p = nfPts[idx];
+        return `<div style="opacity:0.6;margin-bottom:3px;font-weight:600">${nfLabels[idx] ?? ''}</div>` +
+          `<div><span style="color:var(--sev-critical)">▲ ${p.new} new</span></div>` +
+          `<div><span style="color:#4ade80">▼ ${p.fixed} fixed</span></div>`;
+      });
       const leg = document.createElement('div'); leg.className = 'nf-legend';
       leg.innerHTML = `<span><span class="nf-legend-dot" style="background:var(--sev-critical)"></span>New</span><span><span class="nf-legend-dot" style="background:#4ade80"></span>Fixed</span>`;
       nfCard.appendChild(nfWrap); nfCard.appendChild(leg);
@@ -1155,7 +1209,21 @@ function buildTrendsView(container) {
     const hdr = document.createElement('div'); hdr.className = 'card-header';
     const t = document.createElement('div'); t.className = 'card-title'; t.textContent = 'Total Issues Over Time';
     hdr.appendChild(t); card.appendChild(hdr);
-    card.insertAdjacentHTML('beforeend', buildTrendSvg(chartSnaps));
+    const trendWrap = document.createElement('div'); trendWrap.className = 'trend-chart-area';
+    trendWrap.innerHTML = buildTrendSvg(chartSnaps);
+    card.appendChild(trendWrap);
+    wireChartHover(trendWrap, chartSnaps.length, 560, 44, 12, idx => {
+      const s = chartSnaps[idx];
+      const isLive = cur && idx === chartSnaps.length - 1;
+      const lbl = isLive ? 'Current' : (s.label ? `${s.label} · ${fmtSnapDate(s)}` : fmtSnapDate(s));
+      const sevParts = SEVERITY_ORDER
+        .filter(sev => (s.counts?.[sev] ?? 0) > 0)
+        .map(sev => `<span style="color:${SEVERITY_COLORS[sev]}">${sev.charAt(0).toUpperCase() + sev.slice(1)}: ${s.counts[sev]}</span>`)
+        .join('<br>');
+      return `<div style="opacity:0.6;margin-bottom:3px;font-weight:600">${lbl}</div>` +
+        `<div>Total: <strong>${s.total}</strong></div>` +
+        (sevParts ? `<div style="margin-top:4px">${sevParts}</div>` : '');
+    });
     chartRow.appendChild(card); view.appendChild(chartRow);
   }
 
