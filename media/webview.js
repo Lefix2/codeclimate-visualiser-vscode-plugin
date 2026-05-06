@@ -55,6 +55,7 @@ let config = {
   showCheckNameChart:  true,
   showSourceChart:     true,
   showFileChart:       true,
+  maxChartSnapshots:   20,
   /** @type {Array<{name:string,index:number}>} */
   customColumns: [],
 };
@@ -75,6 +76,8 @@ const snippetMeta = new Map();
 
 let currentView = 'overview';
 let navTabsReady = false;
+/** @type {ResizeObserver|null} */
+let trendsResizeObserver = null;
 
 function setView(view) {
   currentView = view;
@@ -1035,8 +1038,8 @@ function getChartTooltip() {
   return tip;
 }
 
-/** @param {HTMLElement} wrapEl @param {number} n @param {number} svgW @param {number} PL @param {number} PR @param {(idx:number)=>string} getContent */
-function wireChartHover(wrapEl, n, svgW, PL, PR, getContent) {
+/** @param {HTMLElement} wrapEl @param {number} n @param {number} _svgW @param {number} PL @param {number} PR @param {(idx:number)=>string} getContent */
+function wireChartHover(wrapEl, n, _svgW, PL, PR, getContent) {
   const tip = getChartTooltip();
   wrapEl.style.position = 'relative';
   const ch = document.createElement('div');
@@ -1044,12 +1047,16 @@ function wireChartHover(wrapEl, n, svgW, PL, PR, getContent) {
   wrapEl.appendChild(ch);
 
   wrapEl.addEventListener('mousemove', e => {
-    const rect = wrapEl.getBoundingClientRect();
-    const scale = rect.width / svgW;
-    const relX = (e.clientX - rect.left) / scale;
-    const frac = Math.max(0, Math.min(1, (relX - PL) / (svgW - PL - PR)));
+    const svgEl = wrapEl.querySelector('svg');
+    if (!svgEl) return;
+    const svgRect = svgEl.getBoundingClientRect();
+    const wrapRect = wrapEl.getBoundingClientRect();
+    const W = svgRect.width;
+    const relX = e.clientX - svgRect.left;
+    const frac = Math.max(0, Math.min(1, (relX - PL) / (W - PL - PR)));
     const idx = Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
-    ch.style.left = ((PL + frac * (svgW - PL - PR)) * scale).toFixed(1) + 'px';
+    const xInSvg = n < 2 ? PL + (W - PL - PR) / 2 : PL + (idx / (n - 1)) * (W - PL - PR);
+    ch.style.left = (svgRect.left - wrapRect.left + xInSvg).toFixed(1) + 'px';
     ch.style.display = 'block';
     tip.innerHTML = getContent(idx);
     tip.style.display = 'block';
@@ -1063,10 +1070,10 @@ function wireChartHover(wrapEl, n, svgW, PL, PR, getContent) {
   wrapEl.addEventListener('mouseleave', () => { tip.style.display = 'none'; ch.style.display = 'none'; });
 }
 
-function buildNewFixedSvg(pts) {
+function buildNewFixedSvg(pts, W = 560) {
   // pts: [{new, fixed}] chronologically (snaps[0..n-1] + current)
   if (pts.length < 2) return '';
-  const W = 560, H = 120, PL = 36, PR = 12, PT = 10, PB = 20;
+  const H = 120, PL = 36, PR = 12, PT = 10, PB = 20;
   const cW = W - PL - PR, cH = H - PT - PB;
   const maxVal = Math.max(...pts.flatMap(p => [p.new, p.fixed]), 1);
   const xOf = /** @param {number} i */ i => PL + (pts.length < 2 ? cW / 2 : (i / (pts.length - 1)) * cW);
@@ -1083,7 +1090,7 @@ function buildNewFixedSvg(pts) {
             <text x="${PL-4}" y="${(y+4).toFixed(1)}" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.45">${lbl}</text>`;
   }).join('');
 
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;">
+  return `<svg width="${W}" height="${H}" style="display:block;">
     ${gridY}
     <polygon points="${newArea}" fill="var(--sev-critical)" fill-opacity="0.12" stroke="none"/>
     <polyline points="${newPts}" fill="none" stroke="var(--sev-critical)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1093,9 +1100,11 @@ function buildNewFixedSvg(pts) {
 }
 
 function buildTrendsView(container) {
+  if (trendsResizeObserver) { trendsResizeObserver.disconnect(); trendsResizeObserver = null; }
   container.innerHTML = '';
   const view = document.createElement('div');
   view.className = 'view';
+  container.appendChild(view);
 
   const snaps = [...historySnapshots].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
@@ -1104,13 +1113,15 @@ function buildTrendsView(container) {
     empty.className = 'trends-note';
     empty.innerHTML = 'No history yet.<br><br>Load a CodeClimate report, then click <strong>Save Snapshot</strong> in the sidebar to start tracking trends over time.';
     view.appendChild(empty);
-    container.appendChild(view);
     return;
   }
 
   // ── Current vs last snapshot diff ───────────────────────────────────────
   const lastSnap = snaps[snaps.length - 1];
   const cur = currentState;
+  const maxSnaps = config.maxChartSnapshots ?? 20;
+  /** @type {Array<{wrap: HTMLElement, build: (w:number)=>string}>} */
+  const chartWrappers = [];
 
   if (cur) {
     const lastSet = new Set(lastSnap.fingerprints ?? []);
@@ -1163,6 +1174,7 @@ function buildTrendsView(container) {
 
     // New vs Fixed area chart (snaps + current)
     if (snaps.length >= 1) {
+      const visSnaps = snaps.slice(-maxSnaps);
       const nfRow = document.createElement('div'); nfRow.className = 'row row-full';
       const nfCard = document.createElement('div'); nfCard.className = 'card';
       const nfHdr = document.createElement('div'); nfHdr.className = 'card-header';
@@ -1171,9 +1183,9 @@ function buildTrendsView(container) {
 
       // Build pts: for each consecutive pair (prev→snap), compute new/fixed
       const nfPts = [];
-      for (let i = 0; i < snaps.length; i++) {
-        const prev = i === 0 ? null : snaps[i - 1];
-        const s = snaps[i];
+      for (let i = 0; i < visSnaps.length; i++) {
+        const prev = i === 0 ? null : visSnaps[i - 1];
+        const s = visSnaps[i];
         if (!prev) { nfPts.push({ new: 0, fixed: 0 }); continue; }
         const pSet = new Set(prev.fingerprints ?? []);
         const sSet = new Set(s.fingerprints ?? []);
@@ -1186,33 +1198,38 @@ function buildTrendsView(container) {
       nfPts.push({ new: newCount, fixed: fixedCount });
 
       const nfWrap = document.createElement('div'); nfWrap.className = 'trend-chart-area';
-      nfWrap.innerHTML = buildNewFixedSvg(nfPts);
-      const nfLabels = [...snaps.map(s => s.label ? `${s.label} · ${fmtSnapDate(s)}` : fmtSnapDate(s)), 'Current'];
-      wireChartHover(nfWrap, nfPts.length, 560, 36, 12, idx => {
+      const leg = document.createElement('div'); leg.className = 'nf-legend';
+      leg.innerHTML = `<span><span class="nf-legend-dot" style="background:var(--sev-critical)"></span>New</span><span><span class="nf-legend-dot" style="background:#4ade80"></span>Fixed</span>`;
+      nfCard.appendChild(nfWrap); nfCard.appendChild(leg);
+      nfRow.appendChild(nfCard); view.appendChild(nfRow);
+      const nfW = Math.round(nfWrap.getBoundingClientRect().width) || 560;
+      nfWrap.insertAdjacentHTML('afterbegin', buildNewFixedSvg(nfPts, nfW));
+      const nfLabels = [...visSnaps.map(s => s.label ? `${s.label} · ${fmtSnapDate(s)}` : fmtSnapDate(s)), 'Current'];
+      wireChartHover(nfWrap, nfPts.length, 0, 36, 12, idx => {
         const p = nfPts[idx];
         return `<div style="opacity:0.6;margin-bottom:3px;font-weight:600">${nfLabels[idx] ?? ''}</div>` +
           `<div><span style="color:var(--sev-critical)">▲ ${p.new} new</span></div>` +
           `<div><span style="color:#4ade80">▼ ${p.fixed} fixed</span></div>`;
       });
-      const leg = document.createElement('div'); leg.className = 'nf-legend';
-      leg.innerHTML = `<span><span class="nf-legend-dot" style="background:var(--sev-critical)"></span>New</span><span><span class="nf-legend-dot" style="background:#4ade80"></span>Fixed</span>`;
-      nfCard.appendChild(nfWrap); nfCard.appendChild(leg);
-      nfRow.appendChild(nfCard); view.appendChild(nfRow);
+      chartWrappers.push({ wrap: nfWrap, build: w => buildNewFixedSvg(nfPts, w) });
     }
   }
 
   // ── Line chart (total over time) ────────────────────────────────────────
   if (snaps.length >= 2) {
-    const chartSnaps = cur ? [...snaps, { timestamp: new Date().toISOString(), total: cur.total, counts: cur.counts }] : snaps;
+    const visSnaps = snaps.slice(-maxSnaps);
+    const chartSnaps = cur ? [...visSnaps, { timestamp: new Date().toISOString(), total: cur.total, counts: cur.counts }] : visSnaps;
     const chartRow = document.createElement('div'); chartRow.className = 'row row-full';
     const card = document.createElement('div'); card.className = 'card';
     const hdr = document.createElement('div'); hdr.className = 'card-header';
     const t = document.createElement('div'); t.className = 'card-title'; t.textContent = 'Total Issues Over Time';
     hdr.appendChild(t); card.appendChild(hdr);
     const trendWrap = document.createElement('div'); trendWrap.className = 'trend-chart-area';
-    trendWrap.innerHTML = buildTrendSvg(chartSnaps);
     card.appendChild(trendWrap);
-    wireChartHover(trendWrap, chartSnaps.length, 560, 44, 12, idx => {
+    chartRow.appendChild(card); view.appendChild(chartRow);
+    const trendW = Math.round(trendWrap.getBoundingClientRect().width) || 560;
+    trendWrap.insertAdjacentHTML('afterbegin', buildTrendSvg(chartSnaps, trendW));
+    wireChartHover(trendWrap, chartSnaps.length, 0, 44, 12, idx => {
       const s = chartSnaps[idx];
       const isLive = cur && idx === chartSnaps.length - 1;
       const lbl = isLive ? 'Current' : (s.label ? `${s.label} · ${fmtSnapDate(s)}` : fmtSnapDate(s));
@@ -1224,7 +1241,20 @@ function buildTrendsView(container) {
         `<div>Total: <strong>${s.total}</strong></div>` +
         (sevParts ? `<div style="margin-top:4px">${sevParts}</div>` : '');
     });
-    chartRow.appendChild(card); view.appendChild(chartRow);
+    chartWrappers.push({ wrap: trendWrap, build: w => buildTrendSvg(chartSnaps, w) });
+  }
+
+  // ── Resize observer for trend charts ────────────────────────────────────
+  if (chartWrappers.length > 0) {
+    trendsResizeObserver = new ResizeObserver(() => {
+      for (const { wrap, build } of chartWrappers) {
+        const w = Math.round(wrap.getBoundingClientRect().width);
+        if (w < 1) continue;
+        const old = wrap.querySelector('svg'); if (old) old.remove();
+        wrap.insertAdjacentHTML('afterbegin', build(w));
+      }
+    });
+    trendsResizeObserver.observe(container);
   }
 
   // ── Per-severity sparkline mini cards ───────────────────────────────────
@@ -1315,12 +1345,10 @@ function buildTrendsView(container) {
   });
   tbl.appendChild(tbody); tableCard.appendChild(tbl);
   tableRow.appendChild(tableCard); view.appendChild(tableRow);
-
-  container.appendChild(view);
 }
 
-function buildTrendSvg(snaps) {
-  const W = 560, H = 140, PL = 44, PR = 12, PT = 10, PB = 28;
+function buildTrendSvg(snaps, W = 560) {
+  const H = 140, PL = 44, PR = 12, PT = 10, PB = 28;
   const cW = W - PL - PR, cH = H - PT - PB;
   const n = snaps.length;
   const maxVal = Math.max(...snaps.map(s => s.total), 1);
@@ -1350,7 +1378,7 @@ function buildTrendSvg(snaps) {
     return `<text x="${x.toFixed(1)}" y="${H - 4}" text-anchor="${anchor}" font-size="10" fill="currentColor" fill-opacity="0.5">${lbl}</text>`;
   }).join('');
 
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;">${gridLines}<polyline points="${totalPts}" fill="none" stroke="var(--accent)" stroke-width="2"/>${sevLines}${dots}${xLabels}</svg>`;
+  return `<svg width="${W}" height="${H}" style="display:block;">${gridLines}<polyline points="${totalPts}" fill="none" stroke="var(--accent)" stroke-width="2"/>${sevLines}${dots}${xLabels}</svg>`;
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────────

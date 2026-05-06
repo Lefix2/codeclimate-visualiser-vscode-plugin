@@ -100,6 +100,7 @@ export class CodeClimatePanel implements vscode.Disposable {
         showCheckNameChart:  cfg.get<boolean>('showCheckNameChart',  true),
         showSourceChart:     cfg.get<boolean>('showSourceChart',     true),
         showFileChart:       cfg.get<boolean>('showFileChart',       true),
+        maxChartSnapshots:   cfg.get<number>('maxChartSnapshots',   20),
         customColumns:       this.issueManager.getCustomColumns(),
       },
       history,
