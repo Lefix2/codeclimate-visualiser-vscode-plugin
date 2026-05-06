@@ -70,6 +70,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 #dashboard {
   padding: 24px 28px 40px;
   max-width: 1400px;
+  min-width: 500px;
 }
 
 /* ── Dashboard header ────────────────────────────────────────────────────────── */
@@ -212,6 +213,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .kpi-sev-bar { width: 3px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
@@ -257,6 +259,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 18px 20px;
+  min-width: 200px;
 }
 
 .card-header {
@@ -894,7 +897,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 
 .trend-card-stripe { display:flex; align-items:center; gap:16px; }
 .trend-card-stripe-bar { width:3px; align-self:stretch; border-radius:2px; flex-shrink:0; }
-.trend-chart-area { width:100%; }
+.trend-chart-area { width:100%; overflow:hidden; min-width:0; }
 .nf-legend { display:flex; gap:16px; margin-top:8px; font-size:11px; color:var(--fg-muted); }
 .nf-legend-dot { width:12px; height:2px; border-radius:1px; display:inline-block; margin-right:4px; vertical-align:middle; }
 

@@ -63,14 +63,12 @@ export class DecorationProvider implements vscode.Disposable {
       const sev: Severity = issue.severity ?? 'info';
       const fullRange = new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER);
 
-      byS.get(sev)?.push({
-        range: fullRange,
-        hoverMessage: new vscode.MarkdownString(
-          `**[${sev.toUpperCase()}]** \`${issue.check_name}\`  \n` +
-          `${issue.description}  \n\n` +
-          `*Lines ${beginLine + 1}–${endLine + 1} · ${issue.sourceFile}*`,
-        ),
-      });
+      const dot: Record<Severity, string> = { blocker: '🟣', critical: '🔴', major: '🟠', minor: '🟡', info: '🔵' };
+      const md = new vscode.MarkdownString(
+        `${dot[sev]} **${issue.check_name}**` +
+        (issue.description ? `\n\n*${issue.description}*` : ''),
+      );
+      byS.get(sev)?.push({ range: fullRange, hoverMessage: md });
     }
 
     for (const [sev, opts] of byS.entries()) {

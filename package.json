@@ -74,6 +74,12 @@
           "type": "boolean",
           "default": true,
           "description": "Show the 'Top Files' pie chart."
+        },
+        "codeclimateVisualiser.maxChartSnapshots": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "description": "Maximum number of history snapshots displayed in trend charts."
         }
       }
     },
