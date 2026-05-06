@@ -115,6 +115,10 @@ export class CodeClimatePanel implements vscode.Disposable {
     });
   }
 
+  setHistoryManager(hm: HistoryManager | null): void {
+    this.historyManager = hm;
+  }
+
   refreshHistory(): void {
     this.updateWebview();
   }

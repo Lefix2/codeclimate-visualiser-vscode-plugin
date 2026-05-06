@@ -148,6 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
   function applyHistoryPath(projectConfig: ProjectConfig | null): void {
     if (workspaceRoot && projectConfig?.historyPath) {
       historyManager = new HistoryManager(workspaceRoot, projectConfig.historyPath);
+      panel.setHistoryManager(historyManager);
     }
   }
 
