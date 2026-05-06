@@ -53,12 +53,11 @@
       "then": ["refresh-view"]
     },
     {
-      "id": "auto-reload-on-save",
-      "label": "Auto-reload on JSON save",
-      "description": "Triggered automatically when a report JSON is saved. Hidden from tab.",
-      "hidden": true,
-      "vsCodeCommand": "codeclimateVisualiser.reloadConfig",
-      "onSave": "testdata/reports/*.json",
+      "id": "grep-errors",
+      "label": "Grep Errors",
+      "description": "Search for 'error' keyword in src/ and generate reports/grep-report.json in CodeClimate format.",
+      "command": "node scripts/grep-errors.js",
+      "onSave": ["src/**/*.ts", "src/**/*.c", "src/**/*.h"],
       "refreshView": true
     },
     {
