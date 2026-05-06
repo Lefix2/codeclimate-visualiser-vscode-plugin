@@ -66,6 +66,15 @@
         ]
       ]
     },
+    "historyPath": {
+      "type": "string",
+      "description": "Path to the history snapshot file (NDJSON). Relative to workspace root or absolute. Defaults to .vscode/codeclimate-visualiser.history.ndjson.",
+      "examples": [
+        ".vscode/codeclimate-visualiser.history.ndjson",
+        "ci/history.ndjson",
+        "/shared/team-history.ndjson"
+      ]
+    },
     "actions": {
       "type": "array",
       "description": "Background actions that can be triggered manually from the Actions tab or automatically on file save.",

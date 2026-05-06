@@ -80,6 +80,11 @@
           "default": 20,
           "minimum": 1,
           "description": "Maximum number of history snapshots displayed in trend charts."
+        },
+        "codeclimateVisualiser.showInFileDecorations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline editor decorations (coloured gutters and hover tooltips) for CodeClimate issues."
         }
       }
     },
@@ -132,6 +137,11 @@
         "command": "codeclimateVisualiser.saveSnapshot",
         "title": "CodeClimate: Save History Snapshot",
         "icon": "$(history)"
+      },
+      {
+        "command": "codeclimateVisualiser.toggleInFileDecorations",
+        "title": "CodeClimate: Toggle In-File Decorations",
+        "icon": "$(eye)"
       }
     ],
     "menus": {

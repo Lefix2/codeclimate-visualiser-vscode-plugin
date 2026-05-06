@@ -79,6 +79,7 @@ export interface ProjectConfig {
   reportPatterns?: (string | PatternEntry)[];
   customColumns?: CustomColumn[];
   actions?: ActionDefinition[];
+  historyPath?: string;
 }
 
 export interface LoadedFileInfo {

@@ -44,12 +44,14 @@ export class DecorationProvider implements vscode.Disposable {
 
   refreshAllEditors(): void {
     this.appliedHashes.clear(); // issue data changed — force re-apply from report
+    if (!vscode.workspace.getConfiguration('codeclimateVisualiser').get<boolean>('showInFileDecorations', true)) return;
     for (const editor of vscode.window.visibleTextEditors) {
       this.applyDecorations(editor);
     }
   }
 
   applyDecorations(editor: vscode.TextEditor): void {
+    if (!vscode.workspace.getConfiguration('codeclimateVisualiser').get<boolean>('showInFileDecorations', true)) return;
     const docPath = vscode.workspace.asRelativePath(editor.document.uri, false);
     const issues = this.issueManager.getIssuesForRelativePath(docPath);
 
