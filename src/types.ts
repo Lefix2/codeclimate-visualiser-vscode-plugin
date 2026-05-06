@@ -62,9 +62,23 @@ export interface PatternEntry {
   values?: Record<string, string | null>;
 }
 
+export interface ActionDefinition {
+  id: string;
+  label: string;
+  description?: string;
+  hidden?: boolean;
+  command?: string;
+  vsCodeCommand?: string;
+  args?: unknown[];
+  onSave?: string | string[];
+  then?: string[];
+  refreshView?: boolean;
+}
+
 export interface ProjectConfig {
   reportPatterns?: (string | PatternEntry)[];
   customColumns?: CustomColumn[];
+  actions?: ActionDefinition[];
 }
 
 export interface LoadedFileInfo {

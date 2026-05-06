@@ -66,6 +66,82 @@
         ]
       ]
     },
+    "actions": {
+      "type": "array",
+      "description": "Background actions that can be triggered manually from the Actions tab or automatically on file save.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for this action."
+          },
+          "label": {
+            "type": "string",
+            "description": "Display name shown in the Actions tab."
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description shown below the label."
+          },
+          "hidden": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide this action from the Actions tab (it can still be triggered by onSave or as a chain target)."
+          },
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute (runs in workspace root)."
+          },
+          "vsCodeCommand": {
+            "type": "string",
+            "description": "VS Code command ID to execute (e.g. 'codeclimateVisualiser.reloadConfig')."
+          },
+          "args": {
+            "type": "array",
+            "description": "Arguments passed to vsCodeCommand."
+          },
+          "onSave": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ],
+            "description": "Glob pattern(s) — trigger this action automatically when a matching file is saved."
+          },
+          "then": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "IDs of actions to run sequentially after this action completes successfully."
+          },
+          "refreshView": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reload issues from configured report files after this action completes."
+          }
+        }
+      },
+      "examples": [
+        [
+          {
+            "id": "run-analysis",
+            "label": "Run Analysis",
+            "description": "Execute CodeClimate analysis and refresh the view.",
+            "command": "codeclimate analyze --format json > reports/codeclimate.json",
+            "refreshView": true
+          },
+          {
+            "id": "auto-analysis",
+            "label": "Auto Analysis",
+            "hidden": true,
+            "command": "codeclimate analyze --format json > reports/codeclimate.json",
+            "onSave": "**/*.ts",
+            "refreshView": true
+          }
+        ]
+      ]
+    },
     "reportPatterns": {
       "type": "array",
       "description": "Glob patterns or absolute paths to CodeClimate JSON/NDJSON report files. Each entry is either a plain glob string or a pattern object with optional regex extraction for custom column values.",

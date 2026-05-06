@@ -7,6 +7,7 @@ import { CodeClimatePanel } from './webviewPanel';
 import { PatternEntry, ProjectConfig } from './types';
 import { SourcesViewProvider } from './sourcesViewProvider';
 import { HistoryManager } from './historyManager';
+import { ActionManager } from './actionManager';
 
 const logChannel = vscode.window.createOutputChannel('CodeClimate Visualiser');
 
@@ -120,7 +121,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const decorationProvider = new DecorationProvider(issueManager);
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const historyManager = workspaceRoot ? new HistoryManager(workspaceRoot) : null;
-  const panel = new CodeClimatePanel(context, issueManager, historyManager);
+  const actionManager = new ActionManager(workspaceRoot, async () => {
+    issueManager.clearAll();
+    const projectConfig = await readProjectConfig();
+    issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
+    const { entries } = await findConfiguredFiles(projectConfig);
+    await loadFromEntries(entries);
+  });
+  const panel = new CodeClimatePanel(context, issueManager, historyManager, actionManager);
 
   async function loadFromEntries(entries: ResolvedFile[]): Promise<number> {
     let loaded = 0;
@@ -141,6 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!issueManager.isEmpty) return;
     const projectConfig = await readProjectConfig();
     issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
+    actionManager.setActions(projectConfig?.actions ?? []);
     const { entries } = await findConfiguredFiles(projectConfig);
     await loadFromEntries(entries);
   }
@@ -184,7 +193,8 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     () => historyManager?.loadHistory() ?? [],
   );
-  context.subscriptions.push(decorationProvider, panel, logChannel,
+  context.subscriptions.push(decorationProvider, panel, logChannel, actionManager,
+    actionManager.onChange(() => panel.refreshActionStatuses()),
     vscode.window.registerWebviewViewProvider(SourcesViewProvider.viewId, sourcesView));
 
   context.subscriptions.push(
@@ -254,6 +264,7 @@ export function activate(context: vscode.ExtensionContext): void {
       decorationProvider.clearDecorations();
       const projectConfig = await readProjectConfig();
       issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
+      actionManager.setActions(projectConfig?.actions ?? []);
       if (getRawPatterns(projectConfig).length === 0) {
         vscode.window.showInformationMessage(
           'No patterns configured. Create .vscode/codeclimate-visualiser.json or add ' +
