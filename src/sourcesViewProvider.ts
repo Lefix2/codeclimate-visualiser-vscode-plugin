@@ -1,27 +1,48 @@
 import * as vscode from 'vscode';
 import { IssueManager } from './issueManager';
+import { HistorySnapshot } from './types';
 
 export class SourcesViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'codeclimateVisualiser.sourcesView';
 
   private view?: vscode.WebviewView;
+  private historySnapshots: HistorySnapshot[] = [];
 
   constructor(
+    private readonly extensionUri: vscode.Uri,
     private readonly issueManager: IssueManager,
     private readonly onInit: () => Promise<void>,
     private readonly onFocusIssue: (id: string) => void,
+    private readonly onDeleteSnapshot: (id: string) => void,
     private readonly onOpenFile: (filePath: string, line: number) => Promise<void>,
+    private readonly historyLoader?: () => HistorySnapshot[],
   ) {
     issueManager.onChange(() => this.update());
   }
 
+  setHistory(snapshots: HistorySnapshot[]): void {
+    this.historySnapshots = snapshots;
+    this.update();
+  }
+
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this.buildHtml();
+    const codiconsDistUri = vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist');
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [codiconsDistUri],
+    };
+    webviewView.webview.html = this.buildHtml(webviewView.webview);
+
+    if (this.historyLoader) {
+      this.historySnapshots = this.historyLoader();
+    }
 
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) this.update();
+      if (webviewView.visible) {
+        if (this.historyLoader) this.historySnapshots = this.historyLoader();
+        this.update();
+      }
     });
 
     webviewView.webview.onDidReceiveMessage(async (msg: {
@@ -37,6 +58,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
         this.onFocusIssue(msg.id);
       } else if (msg.type === 'openFile' && msg.path) {
         await this.onOpenFile(msg.path, msg.line ?? 1);
+      } else if (msg.type === 'deleteSnapshot' && msg.id) {
+        this.onDeleteSnapshot(msg.id);
+      } else if (msg.type === 'openSourceFile' && msg.uri) {
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(msg.uri));
       }
     });
 
@@ -56,16 +81,20 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       customColumns: i.customColumns,
     }));
     const customColumns = this.issueManager.getCustomColumns();
-    this.view.webview.postMessage({ type: 'update', files, issues, customColumns });
+    this.view.webview.postMessage({ type: 'update', files, issues, customColumns, history: this.historySnapshots });
   }
 
-  private buildHtml(): string {
+  private buildHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
+    const codiconsUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')
+    );
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+  <link rel="stylesheet" href="${codiconsUri}">
   <style>
     html, body {
       height: 100%; overflow: hidden;
@@ -131,9 +160,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       flex-shrink: 0; border-radius: 2px; line-height: 0;
     }
     .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
-    .hdr-more { opacity: 0.55; margin-left: 2px; }
-    .hdr-more:hover { opacity: 1; }
-    .hdr-more.active { opacity: 1; color: var(--vscode-button-background); }
+    .hdr-more { margin-left: 2px; }
+    .hdr-more:hover { background: var(--vscode-toolbar-hoverBackground); }
+    .hdr-more.active { color: var(--vscode-button-background); }
+    .section-header:not(.expanded) .hdr-more { display: none; }
 
     /* ── Sources list ───────────────────────── */
     .source-item { display: flex; align-items: center; height: 22px; padding: 0 8px; gap: 4px; }
@@ -244,6 +274,25 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
 
     /* ── Empty state ────────────────────────── */
     #empty-msg { padding: 8px; opacity: 0.5; font-style: italic; }
+
+    /* ── History section ────────────────────── */
+    .snap-item {
+      display: flex; align-items: flex-start; padding: 4px 8px 4px 22px; gap: 4px;
+      cursor: default; flex-direction: column;
+    }
+    .snap-item:hover { background: var(--vscode-list-hoverBackground); }
+    .snap-row1 { display: flex; align-items: center; width: 100%; gap: 4px; }
+    .snap-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+    .snap-date { opacity: 0.5; font-size: 0.82em; flex-shrink: 0; }
+    .snap-total { font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .snap-delete { opacity: 0; transition: opacity 0.1s; flex-shrink: 0; }
+    .snap-item:hover .snap-delete { opacity: 0.45; }
+    .snap-item:hover .snap-delete:hover { opacity: 1; }
+    .snap-diff { display: flex; gap: 6px; font-size: 0.82em; opacity: 0.75; margin-top: 1px; }
+    .snap-diff .new  { color: #f87171; }
+    .snap-diff .fixed { color: #4ade80; }
+    .snap-empty { padding: 6px 8px 6px 22px; opacity: 0.5; font-style: italic; font-size: 0.9em; }
+    #history-body { max-height: 128px; overflow-y: auto; }
   </style>
 </head>
 <body>
@@ -256,6 +305,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       <span class="arrow" id="sources-arrow"></span>
       <span class="hdr-title">Reports</span>
       <span class="hdr-count" id="sources-count"></span>
+      <button class="icon-btn hdr-more" id="btn-reload-config" title="Reload Config"><i class="codicon codicon-refresh"></i></button>
     </div>
     <div class="section-body open" id="sources-body">
       <div id="sources-list"></div>
@@ -268,9 +318,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       <span class="arrow" id="issues-arrow"></span>
       <span class="hdr-title">Issues</span>
       <span class="hdr-count" id="issues-count"></span>
-      <button class="icon-btn hdr-more" id="btn-filter" title="Filter"></button>
-      <button class="icon-btn hdr-more" id="btn-sort" title="Sort"></button>
-      <button class="icon-btn hdr-more" id="btn-more" title="View options"></button>
+      <button class="icon-btn hdr-more" id="btn-collapse-all" title="Collapse All"><i class="codicon codicon-collapse-all"></i></button>
+      <button class="icon-btn hdr-more" id="btn-filter" title="Filter"><i class="codicon codicon-filter"></i></button>
+      <button class="icon-btn hdr-more" id="btn-sort" title="Sort"><i class="codicon codicon-sort-precedence"></i></button>
+      <button class="icon-btn hdr-more" id="btn-more" title="View options"><i class="codicon codicon-ellipsis"></i></button>
     </div>
     <div class="section-body-flex open" id="issues-body">
       <div id="issues-list"></div>
@@ -312,6 +363,18 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
 
   <div id="empty-msg">No reports loaded.</div>
 
+  <div id="history-section" class="section" style="display:none">
+    <div class="section-header expanded" id="history-header">
+      <span class="arrow" id="history-arrow"></span>
+      <span class="hdr-title">History</span>
+      <span class="hdr-count" id="history-count"></span>
+      <button class="icon-btn hdr-more" id="btn-save-snapshot" title="Save Snapshot"><i class="codicon codicon-tag"></i></button>
+    </div>
+    <div class="section-body open" id="history-body">
+      <div id="history-list"></div>
+    </div>
+  </div>
+
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const SEV = { blocker:'#7b1fa2', critical:'#e53935', major:'#f4511e', minor:'#f9a825', info:'#78909c' };
@@ -321,22 +384,16 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     let sortBy  = 'severity';  // 'severity' | 'checkname' | 'filename'
     let sortDir = 'asc';       // 'asc' | 'desc'
     let filters = { severities: new Set(), checkName: '', fileName: '', custom: {} };
+    let customColumnDefs = [];  // CustomColumn[] from last update
 
-    // ── SVG icons ────────────────────────────────────────────────────────
+    // ── SVG icons (tree only — header buttons use codicons) ──────────────
     const ICONS = {
-      chevronRight: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="5.5,3 10.5,8 5.5,13"/></svg>',
-      chevronDown:  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,5.5 8,10.5 13,5.5"/></svg>',
-      close:        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>',
-      focusTable:   '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="6" y1="3" x2="6" y2="13"/></svg>',
-      filter:       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,3 14,3 9,9 9,14 7,14 7,9"/></svg>',
-      sort:         '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="10" y2="4"/><line x1="2" y1="8" x2="7" y2="8"/><line x1="2" y1="12" x2="5" y2="12"/><polyline points="12,2 12,14"/><polyline points="9,11 12,14 15,11"/></svg>',
-      ellipsis:     '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/></svg>',
-      folder:       '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4C1.5 3.45 1.95 3 2.5 3H5.5L7 4.5H11.5C12.05 4.5 12.5 4.95 12.5 5.5V10.5C12.5 11.05 12.05 11.5 11.5 11.5H2.5C1.95 11.5 1.5 11.05 1.5 10.5V4z"/></svg>',
+      chevronRight: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5.5,3 10.5,8 5.5,13"/></svg>',
+      chevronDown:  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,5.5 8,10.5 13,5.5"/></svg>',
+      close:        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><line x1="3.5" y1="3.5" x2="12.5" y2="12.5"/><line x1="12.5" y1="3.5" x2="3.5" y2="12.5"/></svg>',
+      focusTable:   '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="7" x2="14" y2="7"/><line x1="6" y1="3" x2="6" y2="13"/></svg>',
+      folder:       '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4C1.5 3.45 1.95 3 2.5 3H5.5L7 4.5H11.5C12.05 4.5 12.5 4.95 12.5 5.5V10.5C12.5 11.05 12.05 11.5 11.5 11.5H2.5C1.95 11.5 1.5 11.05 1.5 10.5V4z"/></svg>',
     };
-
-    document.getElementById('btn-filter').innerHTML = ICONS.filter;
-    document.getElementById('btn-sort').innerHTML   = ICONS.sort;
-    document.getElementById('btn-more').innerHTML   = ICONS.ellipsis;
 
     // ── Helpers ──────────────────────────────────────────────────────────
     function maxSev(issues) {
@@ -364,6 +421,20 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       return extractLine(raw) || 0;
     }
 
+    // ── Custom column value resolution (mirrors webview.js) ──────────────
+    function getNestedField(obj, path) {
+      return path.split('.').reduce((o, k) => (o != null ? o[k] : undefined), obj);
+    }
+    function getSidebarCustomValue(issue, colDef) {
+      if (colDef.fromField && colDef.fieldRegex) {
+        const fieldVal = String(getNestedField(issue, colDef.fromField) ?? '');
+        const match = fieldVal.match(new RegExp(colDef.fieldRegex));
+        if (match) return match[(colDef.captureGroup ?? 0) + 1] ?? '';
+        return '';
+      }
+      return (issue.customColumns ?? {})[colDef.name] ?? '';
+    }
+
     // ── Filter logic ─────────────────────────────────────────────────────
     function filtersActive() {
       return filters.severities.size > 0 || filters.checkName !== '' || filters.fileName !== '' ||
@@ -380,7 +451,8 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
         }
         for (const [col, val] of Object.entries(filters.custom)) {
           if (!val) continue;
-          const colVal = (i.customColumns && i.customColumns[col]) || '';
+          const colDef = customColumnDefs.find(c => c.name === col);
+          const colVal = colDef ? getSidebarCustomValue(i, colDef) : ((i.customColumns && i.customColumns[col]) || '');
           if (!colVal.toLowerCase().includes(val.toLowerCase())) return false;
         }
         return true;
@@ -392,9 +464,10 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       document.getElementById('btn-filter').title = active ? 'Filters active' : 'Filter';
     }
     function rebuildCustomFilterInputs(customColumns) {
+      customColumnDefs = customColumns || [];
       const container = document.getElementById('filter-custom-cols');
       container.innerHTML = '';
-      const visible = (customColumns || []).filter(c => c.showFilter !== false);
+      const visible = customColumnDefs.filter(c => c.showFilter !== false);
       for (const col of visible) {
         const sep = document.createElement('div'); sep.className = 'dropdown-sep';
         const lbl = document.createElement('div'); lbl.className = 'filter-section-lbl';
@@ -555,7 +628,7 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
       const hdr   = document.getElementById(headerId);
       const body  = document.getElementById(bodyId);
       const arrow = document.getElementById(arrowId);
-      if (arrow) arrow.innerHTML = ICONS.chevronDown;
+      if (arrow) arrow.innerHTML = hdr.classList.contains('expanded') ? ICONS.chevronDown : ICONS.chevronRight;
       hdr.addEventListener('click', () => {
         const open = hdr.classList.toggle('expanded');
         body.classList.toggle('open', open);
@@ -564,14 +637,40 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     }
     wireToggle('sources-header', 'sources-body', 'sources-arrow');
     wireToggle('issues-header',  'issues-body',  'issues-arrow');
+    wireToggle('history-header', 'history-body', 'history-arrow');
+
+    // ── Reload config button ────────────────────────────────────────────
+    document.getElementById('btn-reload-config').addEventListener('click', e => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.reloadConfig' });
+    });
+
+    // ── Save snapshot button ─────────────────────────────────────────────
+    document.getElementById('btn-save-snapshot').addEventListener('click', e => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'command', command: 'codeclimateVisualiser.saveSnapshot' });
+    });
+
+    // ── Collapse all button ───────────────────────────────────────────────
+    document.getElementById('btn-collapse-all').addEventListener('click', e => {
+      e.stopPropagation();
+      const list = document.getElementById('issues-list');
+      list.querySelectorAll('.file-group-hdr.expanded, .tree-node-hdr.expanded').forEach(hdr => {
+        hdr.classList.remove('expanded');
+        const arrow = hdr.querySelector('.arrow');
+        if (arrow) arrow.innerHTML = ICONS.chevronRight;
+      });
+      list.querySelectorAll('.file-group-body.open').forEach(body => body.classList.remove('open'));
+    });
 
     // ── Data updates ─────────────────────────────────────────────────────
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'update') {
         rebuildCustomFilterInputs(msg.customColumns || []);
-        renderSources(msg.files  || []);
-        renderIssues (msg.issues || []);
+        renderSources(msg.files    || []);
+        renderIssues (msg.issues   || []);
+        renderHistory(msg.history  || []);
       }
     });
 
@@ -595,12 +694,96 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
           vscode.postMessage({ type: 'removeSource', uri: f.uri });
         });
         const name = document.createElement('span');
-        name.className = 'source-name'; name.title = f.uri; name.textContent = f.filename;
+        name.className = 'source-name'; name.title = 'Open file'; name.textContent = f.filename;
+        name.style.cursor = 'pointer';
+        name.addEventListener('click', e => {
+          e.stopPropagation();
+          vscode.postMessage({ type: 'openSourceFile', uri: f.uri });
+        });
         const cnt = document.createElement('span');
         cnt.className = 'count'; cnt.textContent = f.issueCount;
         item.appendChild(rm); item.appendChild(name); item.appendChild(cnt);
         list.appendChild(item);
       }
+    }
+
+    // ── History ──────────────────────────────────────────────────────────
+    function renderHistory(snapshots) {
+      const section = document.getElementById('history-section');
+      const list    = document.getElementById('history-list');
+      const count   = document.getElementById('history-count');
+      section.style.display = '';
+      count.textContent = snapshots.length;
+      list.innerHTML = '';
+
+      if (snapshots.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'snap-empty';
+        empty.textContent = 'No snapshots yet.';
+        list.appendChild(empty);
+        return;
+      }
+
+      // Newest first
+      const sorted = [...snapshots].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+      sorted.forEach((snap, idx) => {
+        const prev = sorted[idx + 1];
+        const item = document.createElement('div');
+        item.className = 'snap-item';
+
+        // Row 1: label + date + delete
+        const row1 = document.createElement('div');
+        row1.className = 'snap-row1';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'snap-label';
+        labelSpan.title = snap.sources ? snap.sources.join(', ') : '';
+        labelSpan.textContent = snap.label || new Date(snap.timestamp).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+        const dateSpan = document.createElement('span');
+        dateSpan.className = 'snap-date';
+        if (snap.label) dateSpan.textContent = new Date(snap.timestamp).toLocaleDateString(undefined, { month:'short', day:'numeric' });
+
+        const totalSpan = document.createElement('span');
+        totalSpan.className = 'snap-total';
+        totalSpan.textContent = snap.total;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'icon-btn snap-delete'; delBtn.title = 'Delete snapshot';
+        delBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><line x1="3" y1="3" x2="11" y2="11"/><line x1="11" y1="3" x2="3" y2="11"/></svg>';
+        delBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          vscode.postMessage({ type: 'deleteSnapshot', id: snap.id });
+        });
+
+        row1.appendChild(labelSpan);
+        row1.appendChild(dateSpan);
+        row1.appendChild(totalSpan);
+        row1.appendChild(delBtn);
+        item.appendChild(row1);
+
+        // Row 2: diff vs next-older snapshot
+        if (prev) {
+          const prevSet = new Set(prev.fingerprints || []);
+          const currSet = new Set(snap.fingerprints || []);
+          const newCount  = (snap.fingerprints || []).filter(fp => !prevSet.has(fp)).length;
+          const fixedCount = (prev.fingerprints || []).filter(fp => !currSet.has(fp)).length;
+          if (newCount > 0 || fixedCount > 0) {
+            const diff = document.createElement('div');
+            diff.className = 'snap-diff';
+            if (newCount  > 0) { const s = document.createElement('span'); s.className = 'new';   s.textContent = '+' + newCount + ' new'; diff.appendChild(s); }
+            if (fixedCount > 0) { const s = document.createElement('span'); s.className = 'fixed'; s.textContent = '-' + fixedCount + ' fixed'; diff.appendChild(s); }
+            if (snap.derivedCount > 0) {
+              const w = document.createElement('span'); w.style.opacity = '0.55'; w.title = snap.derivedCount + ' issues tracked via derived fingerprint (may be inaccurate if code moved)'; w.textContent = '⚠';
+              diff.appendChild(w);
+            }
+            item.appendChild(diff);
+          }
+        }
+
+        list.appendChild(item);
+      });
     }
 
     // ── Issue item builders ──────────────────────────────────────────────

@@ -14,6 +14,8 @@ export class DecorationProvider implements vscode.Disposable {
   // Full range (begin → end): coloured border + subtle background tint
   private rangeDecTypes = new Map<Severity, vscode.TextEditorDecorationType>();
   private disposables: vscode.Disposable[] = [];
+  // uri → issue-id hash last applied; skip re-apply if unchanged so VS Code keeps tracking shifted ranges.
+  private appliedHashes = new Map<string, string>();
 
   constructor(private issueManager: IssueManager) {
     for (const [severity, colors] of Object.entries(SEVERITY_COLORS) as [Severity, typeof SEVERITY_COLORS[Severity]][]) {
@@ -41,14 +43,22 @@ export class DecorationProvider implements vscode.Disposable {
   }
 
   refreshAllEditors(): void {
+    this.appliedHashes.clear(); // issue data changed — force re-apply from report
+    if (!vscode.workspace.getConfiguration('codeclimateVisualiser').get<boolean>('showInFileDecorations', true)) return;
     for (const editor of vscode.window.visibleTextEditors) {
       this.applyDecorations(editor);
     }
   }
 
   applyDecorations(editor: vscode.TextEditor): void {
+    if (!vscode.workspace.getConfiguration('codeclimateVisualiser').get<boolean>('showInFileDecorations', true)) return;
     const docPath = vscode.workspace.asRelativePath(editor.document.uri, false);
     const issues = this.issueManager.getIssuesForRelativePath(docPath);
+
+    const key = editor.document.uri.toString();
+    const hash = issues.map(i => i.id).join('|');
+    if (this.appliedHashes.get(key) === hash) return; // same data — let VS Code keep tracking shifted ranges
+    this.appliedHashes.set(key, hash);
 
     const byS = new Map<Severity, vscode.DecorationOptions[]>();
     for (const sev of Object.keys(SEVERITY_COLORS) as Severity[]) byS.set(sev, []);
@@ -63,14 +73,12 @@ export class DecorationProvider implements vscode.Disposable {
       const sev: Severity = issue.severity ?? 'info';
       const fullRange = new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER);
 
-      byS.get(sev)?.push({
-        range: fullRange,
-        hoverMessage: new vscode.MarkdownString(
-          `**[${sev.toUpperCase()}]** \`${issue.check_name}\`  \n` +
-          `${issue.description}  \n\n` +
-          `*Lines ${beginLine + 1}–${endLine + 1} · ${issue.sourceFile}*`,
-        ),
-      });
+      const dot: Record<Severity, string> = { blocker: '🟣', critical: '🔴', major: '🟠', minor: '🟡', info: '🔵' };
+      const md = new vscode.MarkdownString(
+        `${dot[sev]} **${issue.check_name}**` +
+        (issue.description ? `\n\n*${issue.description}*` : ''),
+      );
+      byS.get(sev)?.push({ range: fullRange, hoverMessage: md });
     }
 
     for (const [sev, opts] of byS.entries()) {
@@ -79,6 +87,7 @@ export class DecorationProvider implements vscode.Disposable {
   }
 
   clearDecorations(): void {
+    this.appliedHashes.clear();
     for (const editor of vscode.window.visibleTextEditors) {
       for (const dt of this.rangeDecTypes.values()) editor.setDecorations(dt, []);
     }

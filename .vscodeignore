@@ -4,8 +4,13 @@ src/**
 testdata/**
 out/**/*.map
 node_modules/**
+!node_modules/@vscode/codicons/dist/codicon.css
+!node_modules/@vscode/codicons/dist/codicon.ttf
 **/.gitignore
 **/.vscodeignore
 tsconfig.json
 *.vsix
 .claude/**
+tmp_for_claude/**
+media/icon-color.svg
+docs/**

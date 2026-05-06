@@ -1,27 +1,71 @@
 {
+  "historyPath": "reports/history/codeclimate-visualiser.history.ndjson",
   "customColumns": [
     {
       "name": "outil",
       "index": 0,
-      "showChart": false,
-      "showQuickFilter": true
-    },
-    {
-      "name": "sous-système",
-      "index": 2,
       "showChart": true,
       "showQuickFilter": true,
+      "showFilter": true
+    },
+    {
+      "name": "package",
+      "index": 1,
+      "showChart": true,
+      "showQuickFilter": true,
+      "showFilter": true,
       "fromField": "location.path",
-      "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
+      "fieldRegex": "src/([^/]+)/.*"
     }
   ],
   "reportPatterns": [
     {
-      "glob": "reports/*-*.json",
-      "regex": "(\\w+)-(\\w+)\\.json",
+      "glob": "reports/*.json",
+      "regex": "(\\w+)-.*\\.json",
       "values": {
         "outil": "$0"
       }
+    }
+  ],
+  "actions": [
+    {
+      "id": "echo-hello",
+      "label": "Echo Hello",
+      "description": "Simple shell command to test action execution.",
+      "command": "echo 'hello from action'"
+    },
+    {
+      "id": "refresh-view",
+      "label": "Reload Reports",
+      "description": "Reload all configured report files into the view.",
+      "vsCodeCommand": "codeclimateVisualiser.reloadConfig"
+    },
+    {
+      "id": "save-snapshot",
+      "label": "Save Snapshot",
+      "description": "Save a history snapshot of current issues.",
+      "vsCodeCommand": "codeclimateVisualiser.saveSnapshot"
+    },
+    {
+      "id": "analyse-and-reload",
+      "label": "Analyse + Reload",
+      "description": "Run analysis then reload (simulated with echo + reload). Chains two actions.",
+      "command": "echo 'analysis done'",
+      "then": ["refresh-view"]
+    },
+    {
+      "id": "grep-errors",
+      "label": "Grep Errors",
+      "description": "Search for 'error' keyword in src/ and generate reports/grep-report.json in CodeClimate format.",
+      "command": "node scripts/grep-errors.js",
+      "onSave": ["src/**/*.ts", "src/**/*.c", "src/**/*.h"],
+      "refreshView": true
+    },
+    {
+      "id": "failing-action",
+      "label": "Failing Action",
+      "description": "Always exits with error — tests the error state display.",
+      "command": "exit 1"
     }
   ]
 }

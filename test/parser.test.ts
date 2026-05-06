@@ -185,27 +185,75 @@ describe('parseCodeClimateFile', () => {
   });
 
   describe('real test data', () => {
-    it('parses NDJSON testdata file (codeparser-dispatch.json)', () => {
-      const content = fs.readFileSync(
-        path.join(TESTDATA_DIR, 'codeparser-dispatch.json'),
-        'utf-8'
-      );
+    for (const filename of ['eslint-report.json', 'codeparser-report.json', 'semgrep-report.json']) {
+      it(`parses NDJSON testdata file (${filename})`, () => {
+        const content = fs.readFileSync(
+          path.join(TESTDATA_DIR, filename),
+          'utf-8'
+        );
+        const issues = parseCodeClimateFile(content);
+        assert.ok(issues.length > 0, 'should parse at least one issue');
+        for (const issue of issues) {
+          assert.strictEqual(issue.type, 'issue');
+          assert.strictEqual(typeof issue.check_name, 'string');
+          assert.ok(issue.location?.path, 'each issue should have a path');
+        }
+      });
+    }
+
+    it('eslint report contains expected check names', () => {
+      const content = fs.readFileSync(path.join(TESTDATA_DIR, 'eslint-report.json'), 'utf-8');
       const issues = parseCodeClimateFile(content);
-      assert.ok(issues.length > 0, 'should parse at least one issue');
-      for (const issue of issues) {
-        assert.strictEqual(issue.type, 'issue');
-        assert.strictEqual(typeof issue.check_name, 'string');
-        assert.ok(issue.location?.path, 'each issue should have a path');
-      }
+      const checkNames = issues.map((i) => i.check_name);
+      assert.ok(checkNames.includes('no-var'), 'should include no-var');
+      assert.ok(checkNames.includes('eqeqeq'), 'should include eqeqeq');
     });
 
-    it('parses NDJSON testdata file (codeparser-gesmaj.json)', () => {
-      const content = fs.readFileSync(
-        path.join(TESTDATA_DIR, 'codeparser-gesmaj.json'),
-        'utf-8'
-      );
+    it('eslint report severity range includes minor through major', () => {
+      const content = fs.readFileSync(path.join(TESTDATA_DIR, 'eslint-report.json'), 'utf-8');
       const issues = parseCodeClimateFile(content);
-      assert.ok(issues.length > 0, 'should parse at least one issue');
+      const severities = new Set(issues.map((i) => i.severity));
+      assert.ok(severities.has('minor'));
+      assert.ok(severities.has('major'));
+    });
+
+    it('codeparser report includes issues with other_locations', () => {
+      const content = fs.readFileSync(path.join(TESTDATA_DIR, 'codeparser-report.json'), 'utf-8');
+      const issues = parseCodeClimateFile(content);
+      const withOther = issues.filter((i) => i.other_locations && i.other_locations.length > 0);
+      assert.ok(withOther.length > 0, 'at least one issue should have other_locations');
+    });
+
+    it('codeparser report references C source files', () => {
+      const content = fs.readFileSync(path.join(TESTDATA_DIR, 'codeparser-report.json'), 'utf-8');
+      const issues = parseCodeClimateFile(content);
+      const paths = issues.map((i) => i.location.path);
+      assert.ok(paths.some((p) => p.endsWith('.c') || p.endsWith('.h')), 'should reference .c or .h files');
+    });
+
+    it('semgrep report contains only Security/Bug Risk categories', () => {
+      const content = fs.readFileSync(path.join(TESTDATA_DIR, 'semgrep-report.json'), 'utf-8');
+      const issues = parseCodeClimateFile(content);
+      const allCategories = issues.flatMap((i) => i.categories ?? []);
+      const unexpected = allCategories.filter((c) => c !== 'Security' && c !== 'Bug Risk');
+      assert.strictEqual(unexpected.length, 0, `unexpected categories: ${unexpected.join(', ')}`);
+    });
+
+    it('semgrep report includes blocker severity', () => {
+      const content = fs.readFileSync(path.join(TESTDATA_DIR, 'semgrep-report.json'), 'utf-8');
+      const issues = parseCodeClimateFile(content);
+      const severities = new Set(issues.map((i) => i.severity));
+      assert.ok(severities.has('blocker'), 'semgrep report should have blocker severity');
+    });
+
+    it('all reports have fingerprints', () => {
+      for (const filename of ['eslint-report.json', 'codeparser-report.json', 'semgrep-report.json']) {
+        const content = fs.readFileSync(path.join(TESTDATA_DIR, filename), 'utf-8');
+        const issues = parseCodeClimateFile(content);
+        for (const issue of issues) {
+          assert.ok(issue.fingerprint, `${filename}: issue "${issue.check_name}" missing fingerprint`);
+        }
+      }
     });
   });
 });

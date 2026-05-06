@@ -21,10 +21,15 @@
             "type": "integer",
             "description": "Display order alongside built-in columns (Severity=0, Category=1, Check Name=2, Source=3, File=4, Line=5, Description=6). Custom columns with the same index as a built-in appear after it. Any value > 6 places the column last."
           },
+          "showQuickFilter": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show quick-filter badges for this column's unique values in the main webview filter bar."
+          },
           "showFilter": {
             "type": "boolean",
             "default": true,
-            "description": "Show quick-filter badges for this column's unique values in the filter bar."
+            "description": "Show a text filter input for this column in the sidebar filter panel."
           },
           "showChart": {
             "type": "boolean",
@@ -53,10 +58,95 @@
           {
             "name": "sous-système",
             "index": 4,
-            "showFilter": true,
+            "showQuickFilter": true,
             "showChart": true,
             "fromField": "location.path",
             "fieldRegex": ".*/sous-systemes/(\\w+)/.*"
+          }
+        ]
+      ]
+    },
+    "historyPath": {
+      "type": "string",
+      "description": "Path to the history snapshot file (NDJSON). Relative to workspace root or absolute. Defaults to .vscode/codeclimate-visualiser.history.ndjson.",
+      "examples": [
+        ".vscode/codeclimate-visualiser.history.ndjson",
+        "ci/history.ndjson",
+        "/shared/team-history.ndjson"
+      ]
+    },
+    "actions": {
+      "type": "array",
+      "description": "Background actions that can be triggered manually from the Actions tab or automatically on file save.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for this action."
+          },
+          "label": {
+            "type": "string",
+            "description": "Display name shown in the Actions tab."
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description shown below the label."
+          },
+          "hidden": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide this action from the Actions tab (it can still be triggered by onSave or as a chain target)."
+          },
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute (runs in workspace root)."
+          },
+          "vsCodeCommand": {
+            "type": "string",
+            "description": "VS Code command ID to execute (e.g. 'codeclimateVisualiser.reloadConfig')."
+          },
+          "args": {
+            "type": "array",
+            "description": "Arguments passed to vsCodeCommand."
+          },
+          "onSave": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ],
+            "description": "Glob pattern(s) — trigger this action automatically when a matching file is saved."
+          },
+          "then": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "IDs of actions to run sequentially after this action completes successfully."
+          },
+          "refreshView": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reload issues from configured report files after this action completes."
+          }
+        }
+      },
+      "examples": [
+        [
+          {
+            "id": "run-analysis",
+            "label": "Run Analysis",
+            "description": "Execute CodeClimate analysis and refresh the view.",
+            "command": "codeclimate analyze --format json > reports/codeclimate.json",
+            "refreshView": true
+          },
+          {
+            "id": "auto-analysis",
+            "label": "Auto Analysis",
+            "hidden": true,
+            "command": "codeclimate analyze --format json > reports/codeclimate.json",
+            "onSave": "**/*.ts",
+            "refreshView": true
           }
         ]
       ]

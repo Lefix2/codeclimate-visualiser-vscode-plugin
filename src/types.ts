@@ -62,13 +62,41 @@ export interface PatternEntry {
   values?: Record<string, string | null>;
 }
 
+export interface ActionDefinition {
+  id: string;
+  label: string;
+  description?: string;
+  hidden?: boolean;
+  command?: string;
+  vsCodeCommand?: string;
+  args?: unknown[];
+  onSave?: string | string[];
+  then?: string[];
+  refreshView?: boolean;
+}
+
 export interface ProjectConfig {
   reportPatterns?: (string | PatternEntry)[];
   customColumns?: CustomColumn[];
+  actions?: ActionDefinition[];
+  historyPath?: string;
 }
 
 export interface LoadedFileInfo {
   uri: string;
   filename: string;
   issueCount: number;
+}
+
+export interface HistorySnapshot {
+  id: string;
+  timestamp: string;
+  label?: string;
+  sources: string[];
+  counts: Record<Severity, number>;
+  total: number;
+  nativeCount: number;
+  derivedCount: number;
+  volatileCount: number;
+  fingerprints: string[];
 }

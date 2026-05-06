@@ -1,0 +1,56 @@
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build site
+        run: |
+          mkdir -p _site
+          # Convert markdown to HTML with a minimal Jekyll-free approach using pandoc
+          sudo apt-get install -y pandoc > /dev/null 2>&1
+          pandoc docs/index.md \
+            --standalone \
+            --metadata title="CodeClimate Visualiser — Technical Docs" \
+            --css https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-dark.min.css \
+            --html-q-tags \
+            -o _site/index.html
+          # Embed body in a centred container
+          sed -i 's/<body>/<body><article class="markdown-body" style="max-width:900px;margin:40px auto;padding:0 24px">/' _site/index.html
+          sed -i 's/<\/body>/<\/article><\/body>/' _site/index.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
