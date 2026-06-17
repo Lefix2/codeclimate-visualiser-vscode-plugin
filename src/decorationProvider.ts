@@ -14,8 +14,10 @@ export class DecorationProvider implements vscode.Disposable {
   // Full range (begin → end): coloured border + subtle background tint
   private rangeDecTypes = new Map<Severity, vscode.TextEditorDecorationType>();
   private disposables: vscode.Disposable[] = [];
-  // uri → issue-id hash last applied; skip re-apply if unchanged so VS Code keeps tracking shifted ranges.
+  // uri → sorted issue-id hash last applied; skip re-apply if unchanged so VS Code keeps tracking shifted ranges.
   private appliedHashes = new Map<string, string>();
+  // URIs visible in the previous onDidChangeVisibleTextEditors event; used to detect editors re-entering the visible set.
+  private prevVisibleUris = new Set<string>();
 
   constructor(private issueManager: IssueManager) {
     for (const [severity, colors] of Object.entries(SEVERITY_COLORS) as [Severity, typeof SEVERITY_COLORS[Severity]][]) {
@@ -28,7 +30,10 @@ export class DecorationProvider implements vscode.Disposable {
         overviewRulerLane: vscode.OverviewRulerLane.Left,
         isWholeLine: true,
       }));
+    }
 
+    for (const editor of vscode.window.visibleTextEditors) {
+      this.prevVisibleUris.add(editor.document.uri.toString());
     }
 
     this.disposables.push(
@@ -36,14 +41,22 @@ export class DecorationProvider implements vscode.Disposable {
         if (editor) this.applyDecorations(editor);
       }),
       vscode.window.onDidChangeVisibleTextEditors((editors) => {
-        for (const editor of editors) this.applyDecorations(editor);
+        const newUris = new Set(editors.map(e => e.document.uri.toString()));
+        for (const editor of editors) {
+          const key = editor.document.uri.toString();
+          if (!this.prevVisibleUris.has(key)) {
+            // Editor re-entered the visible set — VS Code may have discarded its decorations.
+            this.appliedHashes.delete(key);
+          }
+          this.applyDecorations(editor);
+        }
+        this.prevVisibleUris = newUris;
       }),
       issueManager.onChange(() => this.refreshAllEditors()),
     );
   }
 
   refreshAllEditors(): void {
-    this.appliedHashes.clear(); // issue data changed — force re-apply from report
     if (!vscode.workspace.getConfiguration('codeclimateVisualiser').get<boolean>('showInFileDecorations', true)) return;
     for (const editor of vscode.window.visibleTextEditors) {
       this.applyDecorations(editor);
@@ -56,7 +69,8 @@ export class DecorationProvider implements vscode.Disposable {
     const issues = this.issueManager.getIssuesForRelativePath(docPath);
 
     const key = editor.document.uri.toString();
-    const hash = issues.map(i => i.id).join('|');
+    // Sort IDs so hash is stable regardless of report load order.
+    const hash = issues.map(i => i.id).sort().join('|');
     if (this.appliedHashes.get(key) === hash) return; // same data — let VS Code keep tracking shifted ranges
     this.appliedHashes.set(key, hash);
 
@@ -88,6 +102,7 @@ export class DecorationProvider implements vscode.Disposable {
 
   clearDecorations(): void {
     this.appliedHashes.clear();
+    this.prevVisibleUris.clear();
     for (const editor of vscode.window.visibleTextEditors) {
       for (const dt of this.rangeDecTypes.values()) editor.setDecorations(dt, []);
     }

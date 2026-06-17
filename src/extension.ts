@@ -122,11 +122,16 @@ export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   let historyManager = workspaceRoot ? new HistoryManager(workspaceRoot) : null;
   const actionManager = new ActionManager(workspaceRoot, async () => {
-    issueManager.clearAll();
-    const projectConfig = await readProjectConfig();
-    issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
-    const { entries } = await findConfiguredFiles(projectConfig);
-    await loadFromEntries(entries);
+    issueManager.suspend();
+    try {
+      issueManager.clearAll();
+      const projectConfig = await readProjectConfig();
+      issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
+      const { entries } = await findConfiguredFiles(projectConfig);
+      await loadFromEntries(entries);
+    } finally {
+      issueManager.resume();
+    }
   });
   const panel = new CodeClimatePanel(context, issueManager, historyManager, actionManager);
 
@@ -149,6 +154,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (workspaceRoot && projectConfig?.historyPath) {
       historyManager = new HistoryManager(workspaceRoot, projectConfig.historyPath);
       panel.setHistoryManager(historyManager);
+      panel.refreshHistory();
     }
   }
 
@@ -319,4 +325,4 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-export function deactivate(): void {}
+export function deactivate(): void { }

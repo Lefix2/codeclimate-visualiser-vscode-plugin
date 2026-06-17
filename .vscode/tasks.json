@@ -19,7 +19,7 @@
     {
       "label": "Build & seed history",
       "dependsOrder": "sequence",
-      "dependsOn": ["npm: compile", "Seed test snapshots"],
+      "dependsOn": ["npm: compile"],
       "group": { "kind": "build", "isDefault": false },
       "presentation": { "reveal": "silent" },
       "problemMatcher": []

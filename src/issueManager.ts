@@ -14,10 +14,26 @@ export class IssueManager {
   private _onChange = new vscode.EventEmitter<void>();
   readonly onChange = this._onChange.event;
   private _customColumns: CustomColumn[] = [];
+  private _suspended = false;
+  private _pendingChange = false;
+
+  suspend(): void { this._suspended = true; }
+
+  resume(): void {
+    this._suspended = false;
+    if (this._pendingChange) {
+      this._pendingChange = false;
+      this._onChange.fire();
+    }
+  }
+
+  private fireChange(): void {
+    if (this._suspended) { this._pendingChange = true; } else { this._onChange.fire(); }
+  }
 
   setCustomColumns(cols: CustomColumn[]): void {
     this._customColumns = cols;
-    this._onChange.fire();
+    this.fireChange();
   }
 
   getCustomColumns(): CustomColumn[] {
@@ -42,17 +58,17 @@ export class IssueManager {
       info: { uri, filename, issueCount: issues.length },
       issues,
     });
-    this._onChange.fire();
+    this.fireChange();
   }
 
   removeFile(uri: string): void {
     this.files.delete(uri);
-    this._onChange.fire();
+    this.fireChange();
   }
 
   clearAll(): void {
     this.files.clear();
-    this._onChange.fire();
+    this.fireChange();
   }
 
   getFileInfos(): LoadedFileInfo[] {
