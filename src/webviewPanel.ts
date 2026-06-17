@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { IssueManager } from './issueManager';
 import { HistoryManager } from './historyManager';
+import { ActionManager } from './actionManager';
 
 export class CodeClimatePanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -12,6 +13,7 @@ export class CodeClimatePanel implements vscode.Disposable {
     private context: vscode.ExtensionContext,
     private issueManager: IssueManager,
     private historyManager: HistoryManager | null,
+    private actionManager: ActionManager | null = null,
   ) {
     this.disposables.push(issueManager.onChange(() => this.updateWebview()));
   }
@@ -54,6 +56,9 @@ export class CodeClimatePanel implements vscode.Disposable {
           case 'editSnapshotLabel':
             this.historyManager?.updateLabel(msg.id, msg.label);
             this.updateWebview();
+            break;
+          case 'runAction':
+            this.actionManager?.runAction(msg.id);
             break;
         }
       },
@@ -105,11 +110,25 @@ export class CodeClimatePanel implements vscode.Disposable {
       },
       history,
       currentState: this.historyManager?.computeCurrentState(rawIssues) ?? null,
+      actions: this.actionManager?.getActions() ?? [],
+      actionStatuses: this.actionManager?.getStates() ?? {},
     });
+  }
+
+  setHistoryManager(hm: HistoryManager | null): void {
+    this.historyManager = hm;
   }
 
   refreshHistory(): void {
     this.updateWebview();
+  }
+
+  refreshActionStatuses(): void {
+    if (!this.panel) return;
+    this.panel.webview.postMessage({
+      type: 'updateActionStatuses',
+      actionStatuses: this.actionManager?.getStates() ?? {},
+    });
   }
 
   /** Resolve filePath to an existing absolute path, or null. */
@@ -233,6 +252,12 @@ export class CodeClimatePanel implements vscode.Disposable {
           </svg>
           Trends
         </button>
+        <button class="dash-nav-tab" data-view="actions" id="nav-tab-actions" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Actions
+        </button>
       </nav>
 
       <div id="view-container"></div>
@@ -269,7 +294,8 @@ type WebviewMessage =
   | { type: 'removeSourceFile'; uri: string }
   | { type: 'requestSnippet'; issueId: string; filePath: string; line: number }
   | { type: 'deleteSnapshot'; id: string }
-  | { type: 'editSnapshotLabel'; id: string; label: string };
+  | { type: 'editSnapshotLabel'; id: string; label: string }
+  | { type: 'runAction'; id: string };
 
 function getNonce(): string {
   let t = '';

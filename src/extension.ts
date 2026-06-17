@@ -7,6 +7,7 @@ import { CodeClimatePanel } from './webviewPanel';
 import { PatternEntry, ProjectConfig } from './types';
 import { SourcesViewProvider } from './sourcesViewProvider';
 import { HistoryManager } from './historyManager';
+import { ActionManager } from './actionManager';
 
 const logChannel = vscode.window.createOutputChannel('CodeClimate Visualiser');
 
@@ -119,8 +120,20 @@ export function activate(context: vscode.ExtensionContext): void {
   const issueManager = new IssueManager();
   const decorationProvider = new DecorationProvider(issueManager);
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const historyManager = workspaceRoot ? new HistoryManager(workspaceRoot) : null;
-  const panel = new CodeClimatePanel(context, issueManager, historyManager);
+  let historyManager = workspaceRoot ? new HistoryManager(workspaceRoot) : null;
+  const actionManager = new ActionManager(workspaceRoot, async () => {
+    issueManager.suspend();
+    try {
+      issueManager.clearAll();
+      const projectConfig = await readProjectConfig();
+      issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
+      const { entries } = await findConfiguredFiles(projectConfig);
+      await loadFromEntries(entries);
+    } finally {
+      issueManager.resume();
+    }
+  });
+  const panel = new CodeClimatePanel(context, issueManager, historyManager, actionManager);
 
   async function loadFromEntries(entries: ResolvedFile[]): Promise<number> {
     let loaded = 0;
@@ -137,10 +150,20 @@ export function activate(context: vscode.ExtensionContext): void {
     return loaded;
   }
 
+  function applyHistoryPath(projectConfig: ProjectConfig | null): void {
+    if (workspaceRoot && projectConfig?.historyPath) {
+      historyManager = new HistoryManager(workspaceRoot, projectConfig.historyPath);
+      panel.setHistoryManager(historyManager);
+      panel.refreshHistory();
+    }
+  }
+
   async function autoLoadFromConfig(): Promise<void> {
     if (!issueManager.isEmpty) return;
     const projectConfig = await readProjectConfig();
     issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
+    actionManager.setActions(projectConfig?.actions ?? []);
+    applyHistoryPath(projectConfig);
     const { entries } = await findConfiguredFiles(projectConfig);
     await loadFromEntries(entries);
   }
@@ -184,7 +207,8 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     () => historyManager?.loadHistory() ?? [],
   );
-  context.subscriptions.push(decorationProvider, panel, logChannel,
+  context.subscriptions.push(decorationProvider, panel, logChannel, actionManager,
+    actionManager.onChange(() => panel.refreshActionStatuses()),
     vscode.window.registerWebviewViewProvider(SourcesViewProvider.viewId, sourcesView));
 
   context.subscriptions.push(
@@ -218,6 +242,11 @@ export function activate(context: vscode.ExtensionContext): void {
       log('Cleared all reports');
     }),
 
+    vscode.commands.registerCommand('codeclimateVisualiser.focusIssueInTable', (issueId: string) => {
+      panel.show();
+      panel.focusIssue(issueId);
+    }),
+
     vscode.commands.registerCommand('codeclimateVisualiser.openView', async () => {
       panel.show();
       await autoLoadFromConfig();
@@ -249,11 +278,27 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }),
 
+    vscode.commands.registerCommand('codeclimateVisualiser.toggleInFileDecorations', () => {
+      const cfg = vscode.workspace.getConfiguration('codeclimateVisualiser');
+      const current = cfg.get<boolean>('showInFileDecorations', true);
+      cfg.update('showInFileDecorations', !current, vscode.ConfigurationTarget.Global);
+      if (current) {
+        decorationProvider.clearDecorations();
+      } else {
+        decorationProvider.refreshAllEditors();
+      }
+      vscode.window.showInformationMessage(
+        `CodeClimate in-file decorations ${current ? 'hidden' : 'shown'}.`,
+      );
+    }),
+
     vscode.commands.registerCommand('codeclimateVisualiser.reloadConfig', async () => {
       issueManager.clearAll();
       decorationProvider.clearDecorations();
       const projectConfig = await readProjectConfig();
       issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
+      actionManager.setActions(projectConfig?.actions ?? []);
+      applyHistoryPath(projectConfig);
       if (getRawPatterns(projectConfig).length === 0) {
         vscode.window.showInformationMessage(
           'No patterns configured. Create .vscode/codeclimate-visualiser.json or add ' +
@@ -285,4 +330,4 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-export function deactivate(): void {}
+export function deactivate(): void { }

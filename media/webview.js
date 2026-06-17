@@ -33,6 +33,10 @@ let customColumnDefs = [];
 let historySnapshots = [];
 /** @type {any} */
 let currentState = null;
+/** @type {any[]} */
+let allActions = [];
+/** @type {Record<string, {id:string, status:string, lastError?:string, lastRunAt?:string}>} */
+let actionStatuses = {};
 
 /** @type {{severities:Set<string>, categories:Set<string>|null, quickTerms:Set<string>, sourceFiles:Set<string>, search:string, custom:Record<string,Set<string>|null>, newOnly:boolean}} */
 let filters = {
@@ -111,7 +115,15 @@ function renderCurrentView() {
     case 'files':    buildFilesView(container);     break;
     case 'treemap':  buildTreemapView(container);   break;
     case 'trends':   buildTrendsView(container);    break;
+    case 'actions':  buildActionsView(container);   break;
   }
+}
+
+function updateActionsTabVisibility() {
+  const tab = el('nav-tab-actions');
+  if (!tab) return;
+  const visible = allActions.some(a => !a.hidden);
+  tab.style.display = visible ? '' : 'none';
 }
 
 // ── Column management ─────────────────────────────────────────────────────────
@@ -193,7 +205,13 @@ window.addEventListener('message', (event) => {
     for (const k of Object.keys(filters.custom)) {
       if (!colNames.has(k)) delete filters.custom[k];
     }
+    allActions     = msg.actions ?? [];
+    actionStatuses = msg.actionStatuses ?? {};
+    updateActionsTabVisibility();
     render();
+  } else if (msg.type === 'updateActionStatuses') {
+    actionStatuses = msg.actionStatuses ?? {};
+    if (currentView === 'actions') renderCurrentView();
   } else if (msg.type === 'snippet') {
     snippetCache.set(msg.issueId, { lines: msg.lines, highlightLine: msg.highlightLine });
     const container = document.getElementById(snippetContainerId(msg.issueId));
@@ -2031,6 +2049,85 @@ function renderSnippet(container, lines, highlightLine, lang = 'plain') {
     pre.appendChild(lineEl);
   }
   container.appendChild(pre);
+}
+
+// ── Actions view ─────────────────────────────────────────────────────────────
+
+function buildActionsView(container) {
+  container.innerHTML = '';
+
+  const visible = allActions.filter(a => !a.hidden);
+  if (visible.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'action-empty';
+    empty.textContent = 'No actions configured. Add actions to .vscode/codeclimate-visualiser.json.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'action-grid';
+
+  for (const action of visible) {
+    const state = actionStatuses[action.id] ?? { id: action.id, status: 'idle' };
+    const card = document.createElement('div');
+    card.className = 'action-card';
+    card.dataset.actionId = action.id;
+
+    // Header row: status + label + run button
+    const header = document.createElement('div');
+    header.className = 'action-header';
+
+    const statusDot = document.createElement('span');
+    statusDot.className = `action-status action-status--${state.status}`;
+    statusDot.title = state.status;
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'action-label';
+    labelEl.textContent = action.label;
+
+    const runBtn = document.createElement('button');
+    runBtn.className = 'action-run-btn';
+    runBtn.disabled = state.status === 'running';
+    runBtn.title = state.status === 'running' ? 'Running…' : 'Run';
+    runBtn.innerHTML = state.status === 'running'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="action-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+    runBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'runAction', id: action.id });
+    });
+
+    header.appendChild(statusDot);
+    header.appendChild(labelEl);
+    header.appendChild(runBtn);
+    card.appendChild(header);
+
+    if (action.description) {
+      const desc = document.createElement('div');
+      desc.className = 'action-desc';
+      desc.textContent = action.description;
+      card.appendChild(desc);
+    }
+
+    if (state.status === 'error' && state.lastError) {
+      const errEl = document.createElement('div');
+      errEl.className = 'action-error';
+      errEl.textContent = state.lastError;
+      card.appendChild(errEl);
+    }
+
+    if (state.lastRunAt) {
+      const meta = document.createElement('div');
+      meta.className = 'action-meta';
+      const d = new Date(state.lastRunAt);
+      meta.textContent = `Last run: ${d.toLocaleTimeString()}`;
+      card.appendChild(meta);
+    }
+
+    grid.appendChild(card);
+  }
+
+  container.appendChild(grid);
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────

@@ -1,0 +1,34 @@
+[
+  {
+    "type": "issue",
+    "check_name": "grep/error-keyword",
+    "description": "Found \"error\": function formatError(err: any): string {",
+    "categories": [
+      "Bug Risk"
+    ],
+    "location": {
+      "path": "src/api/router.ts",
+      "lines": {
+        "begin": 27
+      }
+    },
+    "severity": "minor",
+    "fingerprint": "57459c0b5f0a1cc94803a14db4a84e72"
+  },
+  {
+    "type": "issue",
+    "check_name": "grep/error-keyword",
+    "description": "Found \"error\": return `Error: ${err.message}`;",
+    "categories": [
+      "Bug Risk"
+    ],
+    "location": {
+      "path": "src/api/router.ts",
+      "lines": {
+        "begin": 28
+      }
+    },
+    "severity": "minor",
+    "fingerprint": "cbf6054f13d4aa9ca2f00548a7e11c96"
+  }
+]

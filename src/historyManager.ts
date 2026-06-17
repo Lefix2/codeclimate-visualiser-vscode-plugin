@@ -25,10 +25,12 @@ function resolveFingerprint(issue: IssueWithSource): { fp: string; source: FpSou
 }
 
 export class HistoryManager {
-  private readonly historyPath: string;
+  readonly historyPath: string;
 
-  constructor(workspaceRoot: string) {
-    this.historyPath = path.join(workspaceRoot, '.vscode', 'codeclimate-visualiser.history.ndjson');
+  constructor(workspaceRoot: string, customPath?: string) {
+    this.historyPath = customPath
+      ? (path.isAbsolute(customPath) ? customPath : path.join(workspaceRoot, customPath))
+      : path.join(workspaceRoot, '.vscode', 'codeclimate-visualiser.history.ndjson');
   }
 
   saveSnapshot(issues: IssueWithSource[], sources: string[], label?: string): HistorySnapshot {
