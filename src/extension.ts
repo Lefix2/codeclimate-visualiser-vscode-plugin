@@ -242,6 +242,11 @@ export function activate(context: vscode.ExtensionContext): void {
       log('Cleared all reports');
     }),
 
+    vscode.commands.registerCommand('codeclimateVisualiser.focusIssueInTable', (issueId: string) => {
+      panel.show();
+      panel.focusIssue(issueId);
+    }),
+
     vscode.commands.registerCommand('codeclimateVisualiser.openView', async () => {
       panel.show();
       await autoLoadFromConfig();

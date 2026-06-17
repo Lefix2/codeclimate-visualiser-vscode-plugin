@@ -88,10 +88,14 @@ export class DecorationProvider implements vscode.Disposable {
       const fullRange = new vscode.Range(beginLine, 0, Math.max(beginLine, endLine), Number.MAX_SAFE_INTEGER);
 
       const dot: Record<Severity, string> = { blocker: '🟣', critical: '🔴', major: '🟠', minor: '🟡', info: '🔵' };
+      const focusArg = encodeURIComponent(JSON.stringify(issue.id));
       const md = new vscode.MarkdownString(
         `${dot[sev]} **${issue.check_name}**` +
-        (issue.description ? `\n\n*${issue.description}*` : ''),
+        (issue.description ? `\n\n*${issue.description}*` : '') +
+        `\n\n[$(table) Voir dans le tableau](command:codeclimateVisualiser.focusIssueInTable?${focusArg})`,
       );
+      md.isTrusted = true;
+      md.supportThemeIcons = true;
       byS.get(sev)?.push({ range: fullRange, hoverMessage: md });
     }
 
