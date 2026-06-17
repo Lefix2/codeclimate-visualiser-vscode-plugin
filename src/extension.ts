@@ -132,7 +132,7 @@ export function activate(context: vscode.ExtensionContext): void {
     } finally {
       issueManager.resume();
     }
-  });
+  }, logChannel);
   const panel = new CodeClimatePanel(context, issueManager, historyManager, actionManager);
 
   async function loadFromEntries(entries: ResolvedFile[]): Promise<number> {

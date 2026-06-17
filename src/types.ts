@@ -62,6 +62,9 @@ export interface PatternEntry {
   values?: Record<string, string | null>;
 }
 
+/** A chained action invocation: bare id, or id with arguments forwarded to the called action. */
+export type ActionThenRef = string | { id: string; args?: unknown[] };
+
 export interface ActionDefinition {
   id: string;
   label: string;
@@ -71,7 +74,7 @@ export interface ActionDefinition {
   vsCodeCommand?: string;
   args?: unknown[];
   onSave?: string | string[];
-  then?: string[];
+  then?: ActionThenRef[];
   refreshView?: boolean;
 }
 

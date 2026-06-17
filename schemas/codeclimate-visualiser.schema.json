@@ -102,7 +102,7 @@
           },
           "command": {
             "type": "string",
-            "description": "Shell command to execute (runs in workspace root)."
+            "description": "Shell command to execute (runs in workspace root). Forwarded args from a chaining action are substituted as $1, $2 … (or ${1}, ${2} …)."
           },
           "vsCodeCommand": {
             "type": "string",
@@ -121,8 +121,21 @@
           },
           "then": {
             "type": "array",
-            "items": { "type": "string" },
-            "description": "IDs of actions to run sequentially after this action completes successfully."
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["id"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": { "type": "string", "description": "ID of the action to run." },
+                    "args": { "type": "array", "description": "Arguments forwarded to the called action (vsCodeCommand args, or $1/$2 … in a shell command)." }
+                  }
+                }
+              ]
+            },
+            "description": "Actions to run sequentially after this one succeeds. Each item is an action id, or { id, args } to forward parameters."
           },
           "refreshView": {
             "type": "boolean",

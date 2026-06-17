@@ -262,10 +262,9 @@ function handleFocusIssue(issueId) {
 // ── Main render ───────────────────────────────────────────────────────────────
 
 function render() {
-  const hasData = allIssues.length > 0;
-  el('empty-state').style.display  = hasData ? 'none' : '';
-  el('dashboard').style.display    = hasData ? ''     : 'none';
-  if (!hasData) return;
+  // Always show the dashboard — with no report loaded it renders everything at zero.
+  el('empty-state').style.display = 'none';
+  el('dashboard').style.display   = '';
   updateSubtitle();
   setupNavTabs();
   renderCurrentView();

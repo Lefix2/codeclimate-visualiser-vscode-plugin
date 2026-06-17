@@ -66,6 +66,20 @@
       "label": "Failing Action",
       "description": "Always exits with error — tests the error state display.",
       "command": "exit 1"
+    },
+    {
+      "id": "echo-arg",
+      "label": "Echo Arg",
+      "hidden": true,
+      "description": "Chain target — echoes the forwarded argument ($1).",
+      "command": "echo \"got arg: $1\""
+    },
+    {
+      "id": "greet-then-echo",
+      "label": "Greet + Echo Arg",
+      "description": "Runs, then calls echo-arg forwarding a parameter.",
+      "command": "echo 'greeting'",
+      "then": [{ "id": "echo-arg", "args": ["world"] }]
     }
   ]
 }
