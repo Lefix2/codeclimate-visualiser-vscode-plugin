@@ -167,7 +167,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "mocha",
-    "package": "vsce package",
+    "package": "node scripts/package.js",
     "publish": "vsce publish"
   },
   "devDependencies": {
