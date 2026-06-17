@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import { ActionDefinition } from './types';
 
-export type ActionStatus = 'idle' | 'running' | 'success' | 'error';
+export type ActionStatus = 'idle' | 'running' | 'waiting' | 'success' | 'error';
 
 export interface ActionState {
   id: string;
@@ -89,7 +89,8 @@ export class ActionManager implements vscode.Disposable {
   async runAction(id: string, callArgs?: unknown[]): Promise<void> {
     const action = this.actions.find(a => a.id === id);
     if (!action) return;
-    if (this.states.get(id)?.status === 'running') return;
+    const current = this.states.get(id)?.status;
+    if (current === 'running' || current === 'waiting') return;
 
     const startedAt = new Date().toISOString();
     this.setState({ id, status: 'running', lastRunAt: startedAt });
@@ -104,17 +105,23 @@ export class ActionManager implements vscode.Disposable {
         await this.runShellCommand(cmd);
       }
 
-      this.setState({ id, status: 'success', lastRunAt: startedAt });
-      this.log(`✔ ${action.label} (${id})`);
-
       if (action.refreshView) {
         await this.onRefreshView();
       }
 
-      for (const next of action.then ?? []) {
-        if (typeof next === 'string') await this.runAction(next);
-        else await this.runAction(next.id, next.args);
+      const chain = action.then ?? [];
+      if (chain.length > 0) {
+        // Own command done, but the chain isn't — stay 'waiting' until every chained action finishes.
+        this.setState({ id, status: 'waiting', lastRunAt: startedAt });
+        this.log(`⏳ ${action.label} (${id}) waiting on ${chain.length} chained action(s)`);
+        for (const next of chain) {
+          if (typeof next === 'string') await this.runAction(next);
+          else await this.runAction(next.id, next.args);
+        }
       }
+
+      this.setState({ id, status: 'success', lastRunAt: startedAt });
+      this.log(`✔ ${action.label} (${id})`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.setState({ id, status: 'error', lastError: msg, lastRunAt: startedAt });

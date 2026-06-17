@@ -1007,6 +1007,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 }
 .action-status--idle    { background: var(--fg-dim); }
 .action-status--running { background: var(--sev-minor); animation: action-pulse 1s infinite; }
+.action-status--waiting { background: var(--sev-major); animation: action-pulse 1.4s infinite; }
 .action-status--success { background: #4ade80; }
 .action-status--error   { background: var(--sev-critical); }
 @keyframes action-pulse {

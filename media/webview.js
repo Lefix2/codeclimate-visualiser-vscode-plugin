@@ -2085,11 +2085,12 @@ function buildActionsView(container) {
     labelEl.className = 'action-label';
     labelEl.textContent = action.label;
 
+    const busy = state.status === 'running' || state.status === 'waiting';
     const runBtn = document.createElement('button');
     runBtn.className = 'action-run-btn';
-    runBtn.disabled = state.status === 'running';
-    runBtn.title = state.status === 'running' ? 'Running…' : 'Run';
-    runBtn.innerHTML = state.status === 'running'
+    runBtn.disabled = busy;
+    runBtn.title = state.status === 'running' ? 'Running…' : state.status === 'waiting' ? 'Waiting on chained actions…' : 'Run';
+    runBtn.innerHTML = busy
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="action-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>'
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
     runBtn.addEventListener('click', () => {
