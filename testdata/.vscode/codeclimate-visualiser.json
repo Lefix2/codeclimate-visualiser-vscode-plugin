@@ -80,6 +80,20 @@
       "description": "Runs, then calls echo-arg forwarding a parameter.",
       "command": "echo 'greeting'",
       "then": [{ "id": "echo-arg", "args": ["world"] }]
+    },
+    {
+      "id": "lint-module",
+      "label": "Lint ${mod}",
+      "description": "Templated action — expands to one per directory under src/, with ${mod} bound to each directory name.",
+      "forEach": { "dirs": "src/*", "as": "mod" },
+      "command": "echo \"linting module ${mod}\"",
+      "onSave": ["src/${mod}/**/*.ts"]
+    },
+    {
+      "id": "lint-all",
+      "label": "Lint All Modules",
+      "description": "Chains the lint-module template — runs every generated per-module action.",
+      "then": ["lint-module"]
     }
   ]
 }

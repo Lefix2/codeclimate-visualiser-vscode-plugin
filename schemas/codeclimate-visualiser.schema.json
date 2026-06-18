@@ -141,6 +141,27 @@
             "type": "boolean",
             "default": false,
             "description": "Reload issues from configured report files after this action completes."
+          },
+          "forEach": {
+            "type": "object",
+            "required": ["as"],
+            "additionalProperties": false,
+            "description": "Expand this action into one concrete action per matched directory or value. The matched name is substituted for ${as} in every string field; generated ids are `${id}-${name}`. A `then` reference to this template id runs all generated actions.",
+            "properties": {
+              "dirs": {
+                "type": "string",
+                "description": "Glob of directories to iterate (e.g. 'sous-systemes/*'); the matched directory basename is bound to ${as}."
+              },
+              "values": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Explicit list of names to iterate, each bound to ${as}."
+              },
+              "as": {
+                "type": "string",
+                "description": "Placeholder name substituted as ${as} in the template's string fields."
+              }
+            }
           }
         }
       },

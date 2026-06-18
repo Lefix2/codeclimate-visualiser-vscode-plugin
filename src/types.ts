@@ -65,6 +65,17 @@ export interface PatternEntry {
 /** A chained action invocation: bare id, or id with arguments forwarded to the called action. */
 export type ActionThenRef = string | { id: string; args?: unknown[] };
 
+/**
+ * Expand one templated action into many concrete ones — one per matched directory
+ * (`dirs` glob, e.g. "sous-systemes/*") or per explicit `values` entry.
+ * The matched name is bound to placeholder `${as}` in every string field of the template.
+ */
+export interface ForEachSpec {
+  dirs?: string;
+  values?: string[];
+  as: string;
+}
+
 export interface ActionDefinition {
   id: string;
   label: string;
@@ -76,6 +87,7 @@ export interface ActionDefinition {
   onSave?: string | string[];
   then?: ActionThenRef[];
   refreshView?: boolean;
+  forEach?: ForEachSpec;
 }
 
 export interface ProjectConfig {

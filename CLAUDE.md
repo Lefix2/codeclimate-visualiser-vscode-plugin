@@ -45,7 +45,7 @@ VS Code extension targeting `^1.85.0`. Entry: `src/extension.ts` → `out/extens
 `.vscode/codeclimate-visualiser.json` — validated by `schemas/codeclimate-visualiser.schema.json`:
 - `reportPatterns` — glob strings or `PatternEntry` objects (`glob`, `regex`, `values`) for loading reports and populating custom columns
 - `customColumns` — extra table columns; can extract values from issue fields via `fromField` + `fieldRegex`
-- `actions` — shell/VS Code commands triggerable from the Actions tab or on file save
+- `actions` — shell/VS Code commands triggerable from the Actions tab or on file save; an action with `forEach` (`{ dirs: glob, as }` or `{ values: [], as }`) is a template expanded at config load (`src/actionExpand.ts`) into one action per match, with `${as}` substituted in every string field and a `then` ref to the template id fanning out to all generated children
 - `historyPath` — override for the history NDJSON file path
 
 `testdata/.vscode/codeclimate-visualiser.json` is the canonical example of all features in use.
