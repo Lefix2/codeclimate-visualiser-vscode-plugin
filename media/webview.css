@@ -968,6 +968,47 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   gap: var(--gap);
   padding: 4px 0;
 }
+/* Collapsed group = action-card-shaped cell with a colour accent; click to expand. */
+.action-card.action-group-collapsed {
+  --group-color: var(--border-strong);
+  border-left: 3px solid var(--group-color);
+  cursor: pointer;
+}
+.action-card.action-group-collapsed:hover { background: var(--surface-hover); }
+
+/* Expanded group = full-width container card (spans every grid column). */
+.action-group-card.expanded {
+  --group-color: var(--border-strong);
+  grid-column: 1 / -1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--group-color);
+  border-radius: var(--r-md);
+}
+.action-group-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; cursor: pointer; user-select: none;
+}
+.action-group-caret {
+  display: inline-flex; color: var(--fg-muted); transition: transform 0.12s;
+}
+.action-group-caret svg { width: 14px; height: 14px; }
+.action-group-caret.collapsed { transform: rotate(-90deg); }
+.action-group-swatch {
+  width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0;
+  background: var(--group-color);
+}
+.action-group-title {
+  font-weight: 600; font-size: 13px; color: var(--fg);
+}
+.action-group-count {
+  font-size: 11px; color: var(--fg-dim);
+  background: color-mix(in srgb, var(--group-color) 16%, transparent);
+  border-radius: 999px; padding: 1px 7px; flex: 0 0 auto;
+}
+.action-group-run { margin-left: auto; flex-shrink: 0; }
+.action-group-run span { font-size: 11px; }
+.action-group-body { padding: 0 12px 12px 12px; }
 .action-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-md); padding: 14px 16px;
@@ -1007,6 +1048,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 }
 .action-status--idle    { background: var(--fg-dim); }
 .action-status--running { background: var(--sev-minor); animation: action-pulse 1s infinite; }
+.action-status--waiting { background: var(--sev-major); animation: action-pulse 1.4s infinite; }
 .action-status--success { background: #4ade80; }
 .action-status--error   { background: var(--sev-critical); }
 @keyframes action-pulse {

@@ -4,10 +4,11 @@ import * as fs from 'fs';
 import { IssueManager } from './issueManager';
 import { DecorationProvider } from './decorationProvider';
 import { CodeClimatePanel } from './webviewPanel';
-import { PatternEntry, ProjectConfig } from './types';
+import { ActionDefinition, PatternEntry, ProjectConfig } from './types';
 import { SourcesViewProvider } from './sourcesViewProvider';
 import { HistoryManager } from './historyManager';
 import { ActionManager } from './actionManager';
+import { expandActions } from './actionExpand';
 
 const logChannel = vscode.window.createOutputChannel('CodeClimate Visualiser');
 
@@ -50,6 +51,35 @@ function resolveColumnValues(entry: PatternEntry, filePath: string): Record<stri
     }
   }
   return result;
+}
+
+/** List basenames of directories matching a `/`-separated glob (with `*`) relative to `root`. */
+function listMatchingDirs(root: string, glob: string): string[] {
+  let current = [root];
+  for (const seg of glob.split('/').filter(Boolean)) {
+    const re = new RegExp('^' + seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$');
+    const next: string[] = [];
+    for (const dir of current) {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        if (e.isDirectory() && re.test(e.name)) next.push(path.join(dir, e.name));
+      }
+    }
+    current = next;
+  }
+  return current.map(d => path.basename(d)).sort();
+}
+
+/** Expand templated (`forEach`) actions against the workspace filesystem. */
+function resolveActions(config: ProjectConfig | null, root: string | undefined): ActionDefinition[] {
+  const actions = config?.actions ?? [];
+  if (!actions.some(a => a.forEach)) return actions;
+  return expandActions(actions, glob => (root ? listMatchingDirs(root, glob) : []));
 }
 
 function getRawPatterns(config: ProjectConfig | null): (string | PatternEntry)[] {
@@ -132,7 +162,7 @@ export function activate(context: vscode.ExtensionContext): void {
     } finally {
       issueManager.resume();
     }
-  });
+  }, logChannel);
   const panel = new CodeClimatePanel(context, issueManager, historyManager, actionManager);
 
   async function loadFromEntries(entries: ResolvedFile[]): Promise<number> {
@@ -162,7 +192,8 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!issueManager.isEmpty) return;
     const projectConfig = await readProjectConfig();
     issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
-    actionManager.setActions(projectConfig?.actions ?? []);
+    actionManager.setActions(resolveActions(projectConfig, workspaceRoot));
+    actionManager.setGroupStyles(projectConfig?.groupStyles ?? {});
     applyHistoryPath(projectConfig);
     const { entries } = await findConfiguredFiles(projectConfig);
     await loadFromEntries(entries);
@@ -297,7 +328,8 @@ export function activate(context: vscode.ExtensionContext): void {
       decorationProvider.clearDecorations();
       const projectConfig = await readProjectConfig();
       issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
-      actionManager.setActions(projectConfig?.actions ?? []);
+      actionManager.setActions(resolveActions(projectConfig, workspaceRoot));
+      actionManager.setGroupStyles(projectConfig?.groupStyles ?? {});
       applyHistoryPath(projectConfig);
       if (getRawPatterns(projectConfig).length === 0) {
         vscode.window.showInformationMessage(

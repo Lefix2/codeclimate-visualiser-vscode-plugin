@@ -36,7 +36,7 @@ VS Code extension targeting `^1.85.0`. Entry: `src/extension.ts` → `out/extens
 - `src/issueManager.ts` — in-memory store keyed by file URI; emits `onChange`
 - `src/decorationProvider.ts` — listens to `issueManager.onChange`, applies gutter decorations; skips re-apply when issue IDs unchanged to preserve VS Code's shifted-range tracking
 - `src/historyManager.ts` — fingerprints issues (native > derived > volatile) for trend diffing
-- `src/actionManager.ts` — `onSave` wired via `vscode.workspace.onDidSaveTextDocument`; actions chain via `then[]`
+- `src/actionManager.ts` — `onSave` wired via `vscode.workspace.onDidSaveTextDocument`; actions chain via `before[]` (run before own command) and `then[]` (run after)
 
 **Webview assets:** `media/webview.js` + `media/webview.css` — bundled as-is (no build step). Communication is message-passing: extension ↔ webview.
 
@@ -45,7 +45,7 @@ VS Code extension targeting `^1.85.0`. Entry: `src/extension.ts` → `out/extens
 `.vscode/codeclimate-visualiser.json` — validated by `schemas/codeclimate-visualiser.schema.json`:
 - `reportPatterns` — glob strings or `PatternEntry` objects (`glob`, `regex`, `values`) for loading reports and populating custom columns
 - `customColumns` — extra table columns; can extract values from issue fields via `fromField` + `fieldRegex`
-- `actions` — shell/VS Code commands triggerable from the Actions tab or on file save
+- `actions` — shell/VS Code commands triggerable from the Actions tab or on file save; an action with `forEach` (`{ dirs: glob, as }` or `{ values: [], as }`) is a template expanded at config load (`src/actionExpand.ts`) into one action per match, with `${as}` substituted in every string field and a `then` ref to the template id fanning out to all generated children. An action's `groups: string[]` lists `/`-separated group paths (multi-membership; each path segment is a nested group, group exists iff named); the Actions webview builds a tree. Groups are collapsed by default and render as action-card-shaped cells (name + description); expanding one (click) makes it a full-width container card holding its sub-groups and member actions, with a "Run all" button (`runActionGroup` message → sequential `runAction` over all descendant action ids). Group colour + description come from `ProjectConfig.groupStyles` (name→`{color?, description?}`, default colour otherwise); forEach children default `groups` to `[templateId]`
 - `historyPath` — override for the history NDJSON file path
 
 `testdata/.vscode/codeclimate-visualiser.json` is the canonical example of all features in use.

@@ -75,6 +75,24 @@
         "/shared/team-history.ndjson"
       ]
     },
+    "groupStyles": {
+      "type": "object",
+      "description": "Per-group presentation in the Actions tab, keyed by group name (the path leaf). Groups without an entry use a default colour.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "color": { "type": "string", "description": "Accent colour (CSS colour — hex or theme variable)." },
+          "description": { "type": "string", "description": "Description shown on the collapsed (action-shaped) group card." }
+        }
+      },
+      "examples": [
+        {
+          "Analyse": { "color": "#8b5cf6", "description": "Toutes les analyses statiques" },
+          "CodeParser": { "color": "#22d3ee" }
+        }
+      ]
+    },
     "actions": {
       "type": "array",
       "description": "Background actions that can be triggered manually from the Actions tab or automatically on file save.",
@@ -102,7 +120,7 @@
           },
           "command": {
             "type": "string",
-            "description": "Shell command to execute (runs in workspace root)."
+            "description": "Shell command to execute (runs in workspace root). Forwarded args from a chaining action are substituted as $1, $2 … (or ${1}, ${2} …)."
           },
           "vsCodeCommand": {
             "type": "string",
@@ -119,15 +137,72 @@
             ],
             "description": "Glob pattern(s) — trigger this action automatically when a matching file is saved."
           },
+          "before": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["id"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": { "type": "string", "description": "ID of the action to run." },
+                    "args": { "type": "array", "description": "Arguments forwarded to the called action (vsCodeCommand args, or $1/$2 … in a shell command)." }
+                  }
+                }
+              ]
+            },
+            "description": "Actions to run sequentially before this one's own command (mirror of 'then'). Each item is an action id, or { id, args } to forward parameters."
+          },
           "then": {
             "type": "array",
-            "items": { "type": "string" },
-            "description": "IDs of actions to run sequentially after this action completes successfully."
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["id"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": { "type": "string", "description": "ID of the action to run." },
+                    "args": { "type": "array", "description": "Arguments forwarded to the called action (vsCodeCommand args, or $1/$2 … in a shell command)." }
+                  }
+                }
+              ]
+            },
+            "description": "Actions to run sequentially after this one succeeds. Each item is an action id, or { id, args } to forward parameters."
           },
           "refreshView": {
             "type": "boolean",
             "default": false,
             "description": "Reload issues from configured report files after this action completes."
+          },
+          "groups": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Group paths this action belongs to (an action can be in several). Each entry is '/'-separated, e.g. 'Analyse/CodeParser' — every segment is a nested group. A group exists only if named here; names are globally unique. Groups render as colour-coded, expandable container cards in the Actions tab with a 'Run all' button. forEach children default to [templateId]."
+          },
+          "forEach": {
+            "type": "object",
+            "required": ["as"],
+            "additionalProperties": false,
+            "description": "Expand this action into one concrete action per matched directory or value. The matched name is substituted for ${as} in every string field; generated ids are `${id}-${name}`. A `then` reference to this template id runs all generated actions.",
+            "properties": {
+              "dirs": {
+                "type": "string",
+                "description": "Glob of directories to iterate (e.g. 'sous-systemes/*'); the matched directory basename is bound to ${as}."
+              },
+              "values": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Explicit list of names to iterate, each bound to ${as}."
+              },
+              "as": {
+                "type": "string",
+                "description": "Placeholder name substituted as ${as} in the template's string fields."
+              }
+            }
           }
         }
       },

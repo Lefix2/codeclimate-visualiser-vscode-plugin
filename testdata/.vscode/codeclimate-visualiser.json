@@ -1,5 +1,11 @@
 {
   "historyPath": "reports/history/codeclimate-visualiser.history.ndjson",
+  "groupStyles": {
+    "Reports": { "color": "#22d3ee", "description": "Reload reports and save history snapshots." },
+    "Analyse": { "color": "#8b5cf6", "description": "All static analysis actions, grouped by tool." },
+    "Linters": { "description": "Lint-style checks over the source tree." },
+    "lint-module": { "color": "#f59e0b", "description": "Per-module lint, expanded from a forEach template." }
+  },
   "customColumns": [
     {
       "name": "outil",
@@ -38,19 +44,23 @@
       "id": "refresh-view",
       "label": "Reload Reports",
       "description": "Reload all configured report files into the view.",
+      "groups": ["Reports"],
       "vsCodeCommand": "codeclimateVisualiser.reloadConfig"
     },
     {
       "id": "save-snapshot",
       "label": "Save Snapshot",
       "description": "Save a history snapshot of current issues.",
+      "groups": ["Reports", "Analyse/History"],
       "vsCodeCommand": "codeclimateVisualiser.saveSnapshot"
     },
     {
       "id": "analyse-and-reload",
       "label": "Analyse + Reload",
-      "description": "Run analysis then reload (simulated with echo + reload). Chains two actions.",
+      "description": "Runs echo-hello before, the analysis itself, then a reload — demonstrates before + then.",
       "command": "echo 'analysis done'",
+      "groups": ["Analyse"],
+      "before": ["echo-hello"],
       "then": ["refresh-view"]
     },
     {
@@ -58,6 +68,7 @@
       "label": "Grep Errors",
       "description": "Search for 'error' keyword in src/ and generate reports/grep-report.json in CodeClimate format.",
       "command": "node scripts/grep-errors.js",
+      "groups": ["Analyse/Linters"],
       "onSave": ["src/**/*.ts", "src/**/*.c", "src/**/*.h"],
       "refreshView": true
     },
@@ -66,6 +77,34 @@
       "label": "Failing Action",
       "description": "Always exits with error — tests the error state display.",
       "command": "exit 1"
+    },
+    {
+      "id": "echo-arg",
+      "label": "Echo Arg",
+      "hidden": true,
+      "description": "Chain target — echoes the forwarded argument ($1).",
+      "command": "echo \"got arg: $1\""
+    },
+    {
+      "id": "greet-then-echo",
+      "label": "Greet + Echo Arg",
+      "description": "Runs, then calls echo-arg forwarding a parameter.",
+      "command": "echo 'greeting'",
+      "then": [{ "id": "echo-arg", "args": ["world"] }]
+    },
+    {
+      "id": "lint-module",
+      "label": "Lint ${mod}",
+      "description": "Templated action — expands to one per directory under src/, with ${mod} bound to each directory name.",
+      "forEach": { "dirs": "src/*", "as": "mod" },
+      "command": "echo \"linting module ${mod}\"",
+      "onSave": ["src/${mod}/**/*.ts"]
+    },
+    {
+      "id": "lint-all",
+      "label": "Lint All Modules",
+      "description": "Chains the lint-module template — runs every generated per-module action.",
+      "then": ["lint-module"]
     }
   ]
 }

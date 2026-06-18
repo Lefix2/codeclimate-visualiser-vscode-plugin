@@ -62,6 +62,20 @@ export interface PatternEntry {
   values?: Record<string, string | null>;
 }
 
+/** A chained action invocation: bare id, or id with arguments forwarded to the called action. */
+export type ActionThenRef = string | { id: string; args?: unknown[] };
+
+/**
+ * Expand one templated action into many concrete ones — one per matched directory
+ * (`dirs` glob, e.g. "sous-systemes/*") or per explicit `values` entry.
+ * The matched name is bound to placeholder `${as}` in every string field of the template.
+ */
+export interface ForEachSpec {
+  dirs?: string;
+  values?: string[];
+  as: string;
+}
+
 export interface ActionDefinition {
   id: string;
   label: string;
@@ -71,14 +85,34 @@ export interface ActionDefinition {
   vsCodeCommand?: string;
   args?: unknown[];
   onSave?: string | string[];
-  then?: string[];
+  /** Actions to run sequentially before this one's own command (mirror of `then`). */
+  before?: ActionThenRef[];
+  then?: ActionThenRef[];
   refreshView?: boolean;
+  forEach?: ForEachSpec;
+  /**
+   * Groups this action belongs to (an action can be in several). Each entry is a `/`-separated
+   * path, e.g. "Analyse/CodeParser" — every segment is a group, nested left-to-right. A group
+   * exists only if named here by some action; group names are globally unique. Colour and
+   * description come from `ProjectConfig.groupStyles` (a default colour applies otherwise).
+   */
+  groups?: string[];
+}
+
+/** Per-group presentation in the Actions tab, keyed by group name (path leaf). */
+export interface GroupStyle {
+  /** Accent colour (CSS colour). Groups without one use a default. */
+  color?: string;
+  /** Description shown on the collapsed (action-shaped) group card. */
+  description?: string;
 }
 
 export interface ProjectConfig {
   reportPatterns?: (string | PatternEntry)[];
   customColumns?: CustomColumn[];
   actions?: ActionDefinition[];
+  /** Per-group colour/description, keyed by group name (path leaf). */
+  groupStyles?: Record<string, GroupStyle>;
   historyPath?: string;
 }
 

@@ -166,6 +166,8 @@ export class SourcesViewProvider implements vscode.WebviewViewProvider {
     .section-header:not(.expanded) .hdr-more { display: none; }
 
     /* ── Sources list ───────────────────────── */
+    /* Cap the REPORTS list at ~6 rows (22px each), scroll beyond. */
+    #sources-list { max-height: 132px; overflow-y: auto; }
     .source-item { display: flex; align-items: center; height: 22px; padding: 0 8px; gap: 4px; }
     .source-item:hover { background: var(--vscode-list-hoverBackground); }
     .close-btn { opacity: 0.25; transition: opacity 0.1s; }

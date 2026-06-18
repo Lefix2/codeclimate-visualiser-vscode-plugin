@@ -60,6 +60,11 @@ export class CodeClimatePanel implements vscode.Disposable {
           case 'runAction':
             this.actionManager?.runAction(msg.id);
             break;
+          case 'runActionGroup':
+            void (async () => {
+              for (const id of msg.ids) await this.actionManager?.runAction(id);
+            })();
+            break;
         }
       },
       undefined,
@@ -112,6 +117,7 @@ export class CodeClimatePanel implements vscode.Disposable {
       currentState: this.historyManager?.computeCurrentState(rawIssues) ?? null,
       actions: this.actionManager?.getActions() ?? [],
       actionStatuses: this.actionManager?.getStates() ?? {},
+      actionGroupStyles: this.actionManager?.getGroupStyles() ?? {},
     });
   }
 
@@ -295,7 +301,8 @@ type WebviewMessage =
   | { type: 'requestSnippet'; issueId: string; filePath: string; line: number }
   | { type: 'deleteSnapshot'; id: string }
   | { type: 'editSnapshotLabel'; id: string; label: string }
-  | { type: 'runAction'; id: string };
+  | { type: 'runAction'; id: string }
+  | { type: 'runActionGroup'; ids: string[] };
 
 function getNonce(): string {
   let t = '';
