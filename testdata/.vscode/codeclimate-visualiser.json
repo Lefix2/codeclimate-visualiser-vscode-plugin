@@ -57,9 +57,10 @@
     {
       "id": "analyse-and-reload",
       "label": "Analyse + Reload",
-      "description": "Run analysis then reload (simulated with echo + reload). Chains two actions.",
+      "description": "Runs echo-hello before, the analysis itself, then a reload — demonstrates before + then.",
       "command": "echo 'analysis done'",
       "groups": ["Analyse"],
+      "before": ["echo-hello"],
       "then": ["refresh-view"]
     },
     {

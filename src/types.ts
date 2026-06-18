@@ -85,6 +85,8 @@ export interface ActionDefinition {
   vsCodeCommand?: string;
   args?: unknown[];
   onSave?: string | string[];
+  /** Actions to run sequentially before this one's own command (mirror of `then`). */
+  before?: ActionThenRef[];
   then?: ActionThenRef[];
   refreshView?: boolean;
   forEach?: ForEachSpec;

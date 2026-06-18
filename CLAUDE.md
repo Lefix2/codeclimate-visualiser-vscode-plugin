@@ -36,7 +36,7 @@ VS Code extension targeting `^1.85.0`. Entry: `src/extension.ts` → `out/extens
 - `src/issueManager.ts` — in-memory store keyed by file URI; emits `onChange`
 - `src/decorationProvider.ts` — listens to `issueManager.onChange`, applies gutter decorations; skips re-apply when issue IDs unchanged to preserve VS Code's shifted-range tracking
 - `src/historyManager.ts` — fingerprints issues (native > derived > volatile) for trend diffing
-- `src/actionManager.ts` — `onSave` wired via `vscode.workspace.onDidSaveTextDocument`; actions chain via `then[]`
+- `src/actionManager.ts` — `onSave` wired via `vscode.workspace.onDidSaveTextDocument`; actions chain via `before[]` (run before own command) and `then[]` (run after)
 
 **Webview assets:** `media/webview.js` + `media/webview.css` — bundled as-is (no build step). Communication is message-passing: extension ↔ webview.
 

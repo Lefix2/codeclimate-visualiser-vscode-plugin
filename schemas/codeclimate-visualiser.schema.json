@@ -137,6 +137,24 @@
             ],
             "description": "Glob pattern(s) — trigger this action automatically when a matching file is saved."
           },
+          "before": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["id"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": { "type": "string", "description": "ID of the action to run." },
+                    "args": { "type": "array", "description": "Arguments forwarded to the called action (vsCodeCommand args, or $1/$2 … in a shell command)." }
+                  }
+                }
+              ]
+            },
+            "description": "Actions to run sequentially before this one's own command (mirror of 'then'). Each item is an action id, or { id, args } to forward parameters."
+          },
           "then": {
             "type": "array",
             "items": {

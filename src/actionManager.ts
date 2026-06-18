@@ -102,6 +102,15 @@ export class ActionManager implements vscode.Disposable {
     this.log(`▶ ${action.label} (${id})${callArgs?.length ? ` args=[${callArgs.join(', ')}]` : ''}`);
 
     try {
+      const pre = action.before ?? [];
+      if (pre.length > 0) {
+        this.log(`⏮ ${action.label} (${id}) running ${pre.length} pre-action(s)`);
+        for (const prev of pre) {
+          if (typeof prev === 'string') await this.runAction(prev);
+          else await this.runAction(prev.id, prev.args);
+        }
+      }
+
       if (action.vsCodeCommand) {
         const args = callArgs ?? action.args ?? [];
         await vscode.commands.executeCommand(action.vsCodeCommand, ...args);
