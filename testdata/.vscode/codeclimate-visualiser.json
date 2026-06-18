@@ -1,5 +1,10 @@
 {
   "historyPath": "reports/history/codeclimate-visualiser.history.ndjson",
+  "groupColors": {
+    "Reports": "#22d3ee",
+    "Analyse": "#8b5cf6",
+    "lint-module": "#f59e0b"
+  },
   "customColumns": [
     {
       "name": "outil",
@@ -38,12 +43,14 @@
       "id": "refresh-view",
       "label": "Reload Reports",
       "description": "Reload all configured report files into the view.",
+      "groups": ["Reports"],
       "vsCodeCommand": "codeclimateVisualiser.reloadConfig"
     },
     {
       "id": "save-snapshot",
       "label": "Save Snapshot",
       "description": "Save a history snapshot of current issues.",
+      "groups": ["Reports", "Analyse/History"],
       "vsCodeCommand": "codeclimateVisualiser.saveSnapshot"
     },
     {
@@ -51,6 +58,7 @@
       "label": "Analyse + Reload",
       "description": "Run analysis then reload (simulated with echo + reload). Chains two actions.",
       "command": "echo 'analysis done'",
+      "groups": ["Analyse"],
       "then": ["refresh-view"]
     },
     {
@@ -58,6 +66,7 @@
       "label": "Grep Errors",
       "description": "Search for 'error' keyword in src/ and generate reports/grep-report.json in CodeClimate format.",
       "command": "node scripts/grep-errors.js",
+      "groups": ["Analyse/Linters"],
       "onSave": ["src/**/*.ts", "src/**/*.c", "src/**/*.h"],
       "refreshView": true
     },

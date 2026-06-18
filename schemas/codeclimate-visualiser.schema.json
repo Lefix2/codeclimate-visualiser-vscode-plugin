@@ -75,6 +75,14 @@
         "/shared/team-history.ndjson"
       ]
     },
+    "groupColors": {
+      "type": "object",
+      "description": "Accent colour per action group, keyed by group name (the path leaf). Groups without an entry use a default colour. Values are CSS colours (hex or theme variables).",
+      "additionalProperties": { "type": "string" },
+      "examples": [
+        { "Analyse": "#8b5cf6", "CodeParser": "#22d3ee" }
+      ]
+    },
     "actions": {
       "type": "array",
       "description": "Background actions that can be triggered manually from the Actions tab or automatically on file save.",
@@ -141,6 +149,11 @@
             "type": "boolean",
             "default": false,
             "description": "Reload issues from configured report files after this action completes."
+          },
+          "groups": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Group paths this action belongs to (an action can be in several). Each entry is '/'-separated, e.g. 'Analyse/CodeParser' — every segment is a nested group. A group exists only if named here; names are globally unique. Groups render as colour-coded, expandable container cards in the Actions tab with a 'Run all' button. forEach children default to [templateId]."
           },
           "forEach": {
             "type": "object",

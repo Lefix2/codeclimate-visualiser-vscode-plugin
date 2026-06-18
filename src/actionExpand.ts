@@ -37,6 +37,9 @@ export function expandActions(actions: ActionDefinition[], resolve: DirResolver)
       const { forEach, ...rest } = action;
       const child = substitutePlaceholder(rest, forEach!.as, name);
       child.id = `${action.id}-${name}`;
+      // Children of a template share a group (so the Actions tab clusters them and can
+      // run the whole template at once). Default to the template id unless groups were set.
+      if (child.groups === undefined) child.groups = [action.id];
       childIds.push(child.id);
       result.push(child);
     }

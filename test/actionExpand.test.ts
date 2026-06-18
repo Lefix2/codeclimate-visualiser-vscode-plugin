@@ -45,6 +45,22 @@ describe('expandActions', () => {
     assert.deepEqual(all.then, ['analyze-x', 'analyze-y']);
   });
 
+  it('groups children under the template id by default', () => {
+    const out = expandActions(
+      [{ id: 'lint', label: '${m}', forEach: { values: ['a', 'b'], as: 'm' } }],
+      () => [],
+    );
+    assert.deepEqual(out.map(a => a.groups), [['lint'], ['lint']]);
+  });
+
+  it('keeps explicit groups (with placeholder substitution) over the default', () => {
+    const out = expandActions(
+      [{ id: 'lint', label: '${m}', groups: ['tools/${m}'], forEach: { values: ['a'], as: 'm' } }],
+      () => [],
+    );
+    assert.deepEqual(out[0].groups, ['tools/a']);
+  });
+
   it('leaves non-template actions untouched', () => {
     const actions: ActionDefinition[] = [
       { id: 'plain', label: 'Plain', command: 'echo hi' },

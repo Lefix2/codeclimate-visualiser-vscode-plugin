@@ -968,6 +968,45 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   gap: var(--gap);
   padding: 4px 0;
 }
+/* A group renders as a colour-coded container card; --group-color defaults to the border colour. */
+.action-group-card {
+  --group-color: var(--border-strong);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--group-color);
+  border-radius: var(--r-md);
+  margin-top: var(--gap);
+}
+.action-group-card.collapsed { background: color-mix(in srgb, var(--group-color) 7%, var(--surface)); }
+.action-group-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; cursor: pointer; user-select: none;
+}
+.action-group-caret {
+  display: inline-flex; color: var(--fg-muted); transition: transform 0.12s;
+}
+.action-group-caret svg { width: 14px; height: 14px; }
+.action-group-caret.collapsed { transform: rotate(-90deg); }
+.action-group-swatch {
+  width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0;
+  background: var(--group-color);
+}
+.action-group-title {
+  font-weight: 600; font-size: 13px; color: var(--fg);
+}
+.action-group-count {
+  font-size: 11px; color: var(--fg-dim);
+  background: color-mix(in srgb, var(--group-color) 16%, transparent);
+  border-radius: 999px; padding: 1px 7px; flex: 0 0 auto;
+}
+.action-group-run { margin-left: auto; flex-shrink: 0; }
+.action-group-run span { font-size: 11px; }
+.action-group-body {
+  padding: 0 12px 12px 12px;
+  display: flex; flex-direction: column; gap: var(--gap);
+}
+/* Nested groups indent slightly via the body padding; keep their own accent. */
+.action-group-body .action-group-card { margin-top: 0; }
 .action-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-md); padding: 14px 16px;

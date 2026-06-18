@@ -35,6 +35,7 @@ function substituteArgs(cmd: string, args?: unknown[]): string {
 
 export class ActionManager implements vscode.Disposable {
   private actions: ActionDefinition[] = [];
+  private groupColors: Record<string, string> = {};
   private states = new Map<string, ActionState>();
   private saveDisposables: vscode.Disposable[] = [];
   private changeEmitter = new vscode.EventEmitter<void>();
@@ -75,6 +76,10 @@ export class ActionManager implements vscode.Disposable {
   }
 
   getActions(): ActionDefinition[] { return this.actions; }
+
+  setGroupColors(colors: Record<string, string>): void { this.groupColors = colors ?? {}; }
+
+  getGroupColors(): Record<string, string> { return this.groupColors; }
 
   getStates(): Record<string, ActionState> {
     const result: Record<string, ActionState> = {};

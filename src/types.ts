@@ -88,12 +88,21 @@ export interface ActionDefinition {
   then?: ActionThenRef[];
   refreshView?: boolean;
   forEach?: ForEachSpec;
+  /**
+   * Groups this action belongs to (an action can be in several). Each entry is a `/`-separated
+   * path, e.g. "Analyse/CodeParser" — every segment is a group, nested left-to-right. A group
+   * exists only if named here by some action; group names are globally unique. Colours come from
+   * `ProjectConfig.groupColors` (a default applies otherwise).
+   */
+  groups?: string[];
 }
 
 export interface ProjectConfig {
   reportPatterns?: (string | PatternEntry)[];
   customColumns?: CustomColumn[];
   actions?: ActionDefinition[];
+  /** Per-group accent colour, keyed by group name (path leaf). Groups without an entry use a default. */
+  groupColors?: Record<string, string>;
   historyPath?: string;
 }
 
