@@ -968,16 +968,23 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   gap: var(--gap);
   padding: 4px 0;
 }
-/* A group renders as a colour-coded container card; --group-color defaults to the border colour. */
-.action-group-card {
+/* Collapsed group = action-card-shaped cell with a colour accent; click to expand. */
+.action-card.action-group-collapsed {
   --group-color: var(--border-strong);
+  border-left: 3px solid var(--group-color);
+  cursor: pointer;
+}
+.action-card.action-group-collapsed:hover { background: var(--surface-hover); }
+
+/* Expanded group = full-width container card (spans every grid column). */
+.action-group-card.expanded {
+  --group-color: var(--border-strong);
+  grid-column: 1 / -1;
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 3px solid var(--group-color);
   border-radius: var(--r-md);
-  margin-top: var(--gap);
 }
-.action-group-card.collapsed { background: color-mix(in srgb, var(--group-color) 7%, var(--surface)); }
 .action-group-header {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px; cursor: pointer; user-select: none;
@@ -1001,12 +1008,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 }
 .action-group-run { margin-left: auto; flex-shrink: 0; }
 .action-group-run span { font-size: 11px; }
-.action-group-body {
-  padding: 0 12px 12px 12px;
-  display: flex; flex-direction: column; gap: var(--gap);
-}
-/* Nested groups indent slightly via the body padding; keep their own accent. */
-.action-group-body .action-group-card { margin-top: 0; }
+.action-group-body { padding: 0 12px 12px 12px; }
 .action-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-md); padding: 14px 16px;

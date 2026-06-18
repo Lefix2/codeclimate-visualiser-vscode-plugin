@@ -75,12 +75,22 @@
         "/shared/team-history.ndjson"
       ]
     },
-    "groupColors": {
+    "groupStyles": {
       "type": "object",
-      "description": "Accent colour per action group, keyed by group name (the path leaf). Groups without an entry use a default colour. Values are CSS colours (hex or theme variables).",
-      "additionalProperties": { "type": "string" },
+      "description": "Per-group presentation in the Actions tab, keyed by group name (the path leaf). Groups without an entry use a default colour.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "color": { "type": "string", "description": "Accent colour (CSS colour — hex or theme variable)." },
+          "description": { "type": "string", "description": "Description shown on the collapsed (action-shaped) group card." }
+        }
+      },
       "examples": [
-        { "Analyse": "#8b5cf6", "CodeParser": "#22d3ee" }
+        {
+          "Analyse": { "color": "#8b5cf6", "description": "Toutes les analyses statiques" },
+          "CodeParser": { "color": "#22d3ee" }
+        }
       ]
     },
     "actions": {

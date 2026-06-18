@@ -117,7 +117,7 @@ export class CodeClimatePanel implements vscode.Disposable {
       currentState: this.historyManager?.computeCurrentState(rawIssues) ?? null,
       actions: this.actionManager?.getActions() ?? [],
       actionStatuses: this.actionManager?.getStates() ?? {},
-      actionGroupColors: this.actionManager?.getGroupColors() ?? {},
+      actionGroupStyles: this.actionManager?.getGroupStyles() ?? {},
     });
   }
 

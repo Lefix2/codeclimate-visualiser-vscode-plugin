@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
-import { ActionDefinition } from './types';
+import { ActionDefinition, GroupStyle } from './types';
 
 export type ActionStatus = 'idle' | 'running' | 'waiting' | 'success' | 'error';
 
@@ -35,7 +35,7 @@ function substituteArgs(cmd: string, args?: unknown[]): string {
 
 export class ActionManager implements vscode.Disposable {
   private actions: ActionDefinition[] = [];
-  private groupColors: Record<string, string> = {};
+  private groupStyles: Record<string, GroupStyle> = {};
   private states = new Map<string, ActionState>();
   private saveDisposables: vscode.Disposable[] = [];
   private changeEmitter = new vscode.EventEmitter<void>();
@@ -77,9 +77,9 @@ export class ActionManager implements vscode.Disposable {
 
   getActions(): ActionDefinition[] { return this.actions; }
 
-  setGroupColors(colors: Record<string, string>): void { this.groupColors = colors ?? {}; }
+  setGroupStyles(styles: Record<string, GroupStyle>): void { this.groupStyles = styles ?? {}; }
 
-  getGroupColors(): Record<string, string> { return this.groupColors; }
+  getGroupStyles(): Record<string, GroupStyle> { return this.groupStyles; }
 
   getStates(): Record<string, ActionState> {
     const result: Record<string, ActionState> = {};

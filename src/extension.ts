@@ -193,7 +193,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const projectConfig = await readProjectConfig();
     issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
     actionManager.setActions(resolveActions(projectConfig, workspaceRoot));
-    actionManager.setGroupColors(projectConfig?.groupColors ?? {});
+    actionManager.setGroupStyles(projectConfig?.groupStyles ?? {});
     applyHistoryPath(projectConfig);
     const { entries } = await findConfiguredFiles(projectConfig);
     await loadFromEntries(entries);
@@ -329,7 +329,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const projectConfig = await readProjectConfig();
       issueManager.setCustomColumns(projectConfig?.customColumns ?? []);
       actionManager.setActions(resolveActions(projectConfig, workspaceRoot));
-      actionManager.setGroupColors(projectConfig?.groupColors ?? {});
+      actionManager.setGroupStyles(projectConfig?.groupStyles ?? {});
       applyHistoryPath(projectConfig);
       if (getRawPatterns(projectConfig).length === 0) {
         vscode.window.showInformationMessage(

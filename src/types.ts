@@ -91,18 +91,26 @@ export interface ActionDefinition {
   /**
    * Groups this action belongs to (an action can be in several). Each entry is a `/`-separated
    * path, e.g. "Analyse/CodeParser" — every segment is a group, nested left-to-right. A group
-   * exists only if named here by some action; group names are globally unique. Colours come from
-   * `ProjectConfig.groupColors` (a default applies otherwise).
+   * exists only if named here by some action; group names are globally unique. Colour and
+   * description come from `ProjectConfig.groupStyles` (a default colour applies otherwise).
    */
   groups?: string[];
+}
+
+/** Per-group presentation in the Actions tab, keyed by group name (path leaf). */
+export interface GroupStyle {
+  /** Accent colour (CSS colour). Groups without one use a default. */
+  color?: string;
+  /** Description shown on the collapsed (action-shaped) group card. */
+  description?: string;
 }
 
 export interface ProjectConfig {
   reportPatterns?: (string | PatternEntry)[];
   customColumns?: CustomColumn[];
   actions?: ActionDefinition[];
-  /** Per-group accent colour, keyed by group name (path leaf). Groups without an entry use a default. */
-  groupColors?: Record<string, string>;
+  /** Per-group colour/description, keyed by group name (path leaf). */
+  groupStyles?: Record<string, GroupStyle>;
   historyPath?: string;
 }
 

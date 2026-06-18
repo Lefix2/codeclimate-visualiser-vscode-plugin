@@ -1,9 +1,10 @@
 {
   "historyPath": "reports/history/codeclimate-visualiser.history.ndjson",
-  "groupColors": {
-    "Reports": "#22d3ee",
-    "Analyse": "#8b5cf6",
-    "lint-module": "#f59e0b"
+  "groupStyles": {
+    "Reports": { "color": "#22d3ee", "description": "Reload reports and save history snapshots." },
+    "Analyse": { "color": "#8b5cf6", "description": "All static analysis actions, grouped by tool." },
+    "Linters": { "description": "Lint-style checks over the source tree." },
+    "lint-module": { "color": "#f59e0b", "description": "Per-module lint, expanded from a forEach template." }
   },
   "customColumns": [
     {

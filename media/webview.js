@@ -37,10 +37,10 @@ let currentState = null;
 let allActions = [];
 /** @type {Record<string, {id:string, status:string, lastError?:string, lastRunAt?:string}>} */
 let actionStatuses = {};
-/** Group paths the user has collapsed in the Actions tab (persisted across re-renders). */
-const collapsedActionGroups = new Set();
-/** @type {Record<string,string>} per-group accent colour, keyed by group name. */
-let actionGroupColors = {};
+/** Group paths the user has expanded in the Actions tab (default collapsed; persisted across re-renders). */
+const expandedActionGroups = new Set();
+/** @type {Record<string,{color?:string,description?:string}>} per-group style, keyed by group name. */
+let actionGroupStyles = {};
 
 /** @type {{severities:Set<string>, categories:Set<string>|null, quickTerms:Set<string>, sourceFiles:Set<string>, search:string, custom:Record<string,Set<string>|null>, newOnly:boolean}} */
 let filters = {
@@ -211,7 +211,7 @@ window.addEventListener('message', (event) => {
     }
     allActions       = msg.actions ?? [];
     actionStatuses   = msg.actionStatuses ?? {};
-    actionGroupColors = msg.actionGroupColors ?? {};
+    actionGroupStyles = msg.actionGroupStyles ?? {};
     updateActionsTabVisibility();
     render();
   } else if (msg.type === 'updateActionStatuses') {
@@ -2070,18 +2070,19 @@ function buildActionsView(container) {
   }
 
   const root = buildActionTree(visible);
+  container.appendChild(renderActionLevel(root, null));
+}
 
-  // Ungrouped actions first, as a plain grid with no container.
-  if (root.actions.length > 0) {
-    const grid = document.createElement('div');
-    grid.className = 'action-grid';
-    for (const action of root.actions) grid.appendChild(createActionCard(action));
-    container.appendChild(grid);
-  }
-  // Then each top-level group as an expandable, colour-coded container.
-  for (const child of root.children.values()) {
-    container.appendChild(createActionGroup(child, null));
-  }
+/**
+ * A grid holding a node's own action cards (ungrouped at root, members inside a group) plus a
+ * cell per child group. Collapsed groups are action-sized cells; expanded ones span full width.
+ */
+function renderActionLevel(node, color) {
+  const grid = document.createElement('div');
+  grid.className = 'action-grid';
+  for (const action of node.actions) grid.appendChild(createActionCard(action));
+  for (const child of node.children.values()) grid.appendChild(createGroupCell(child, color));
+  return grid;
 }
 
 /**
@@ -2090,7 +2091,7 @@ function buildActionsView(container) {
  * Actions with no group sit on the root.
  */
 function buildActionTree(actions) {
-  const root = { name: '', path: '', color: null, children: new Map(), actions: [] };
+  const root = { name: '', path: '', color: null, description: null, children: new Map(), actions: [] };
   for (const action of actions) {
     const paths = Array.isArray(action.groups) ? action.groups : [];
     const cleaned = paths
@@ -2103,9 +2104,11 @@ function buildActionTree(actions) {
       for (const seg of segs) {
         path = path ? `${path}/${seg}` : seg;
         if (!node.children.has(seg)) {
+          const style = actionGroupStyles[seg] ?? {};
           node.children.set(seg, {
             name: seg, path,
-            color: actionGroupColors[seg] ?? null,
+            color: style.color ?? null,
+            description: style.description ?? null,
             children: new Map(), actions: [],
           });
         }
@@ -2129,21 +2132,84 @@ function isActionIdBusy(id) {
   return s === 'running' || s === 'waiting';
 }
 
-/** Render a group as a colour-coded, expandable container card holding sub-groups and actions. */
-function createActionGroup(node, parentColor) {
-  const color = node.color ?? parentColor ?? null;
-  const collapsed = collapsedActionGroups.has(node.path);
-  const ids = [...descendantActionIds(node)];
+function createRunAllButton(ids) {
+  const anyBusy = ids.some(isActionIdBusy);
+  const btn = document.createElement('button');
+  btn.className = 'action-run-btn action-group-run';
+  btn.disabled = anyBusy || ids.length === 0;
+  btn.title = anyBusy ? 'Group running…' : `Run all ${ids.length} actions in this group`;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Run all</span>';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    vscode.postMessage({ type: 'runActionGroup', ids });
+  });
+  return btn;
+}
 
+/** Dispatch a group node to its collapsed (action-shaped) or expanded (full-width) form. */
+function createGroupCell(node, parentColor) {
+  const color = node.color ?? parentColor ?? null;
+  return expandedActionGroups.has(node.path)
+    ? createExpandedGroup(node, color)
+    : createCollapsedGroupCard(node, color);
+}
+
+/** Collapsed group: looks like an action card (label + description), click to expand. */
+function createCollapsedGroupCard(node, color) {
+  const ids = [...descendantActionIds(node)];
   const card = document.createElement('div');
-  card.className = `action-group-card${collapsed ? ' collapsed' : ''}`;
+  card.className = 'action-card action-group-collapsed';
+  if (color) card.style.setProperty('--group-color', color);
+  card.title = 'Expand group';
+  card.addEventListener('click', () => { expandedActionGroups.add(node.path); renderCurrentView(); });
+
+  const header = document.createElement('div');
+  header.className = 'action-header';
+
+  const caret = document.createElement('span');
+  caret.className = 'action-group-caret collapsed';
+  caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
+  const swatch = document.createElement('span');
+  swatch.className = 'action-group-swatch';
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'action-label';
+  labelEl.textContent = node.name;
+
+  const count = document.createElement('span');
+  count.className = 'action-group-count';
+  count.textContent = String(ids.length);
+
+  header.appendChild(caret);
+  header.appendChild(swatch);
+  header.appendChild(labelEl);
+  header.appendChild(count);
+  header.appendChild(createRunAllButton(ids));
+  card.appendChild(header);
+
+  const desc = document.createElement('div');
+  desc.className = 'action-desc';
+  const subCount = node.children.size;
+  desc.textContent = node.description
+    ?? `${ids.length} action${ids.length === 1 ? '' : 's'}${subCount ? ` · ${subCount} sub-group${subCount === 1 ? '' : 's'}` : ''}`;
+  card.appendChild(desc);
+
+  return card;
+}
+
+/** Expanded group: full-width container holding sub-groups and member actions (as now). */
+function createExpandedGroup(node, color) {
+  const ids = [...descendantActionIds(node)];
+  const card = document.createElement('div');
+  card.className = 'action-group-card expanded';
   if (color) card.style.setProperty('--group-color', color);
 
   const header = document.createElement('div');
   header.className = 'action-group-header';
 
   const caret = document.createElement('span');
-  caret.className = `action-group-caret${collapsed ? ' collapsed' : ''}`;
+  caret.className = 'action-group-caret';
   caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 
   const swatch = document.createElement('span');
@@ -2157,44 +2223,21 @@ function createActionGroup(node, parentColor) {
   count.className = 'action-group-count';
   count.textContent = String(ids.length);
 
-  const anyBusy = ids.some(isActionIdBusy);
-  const runAllBtn = document.createElement('button');
-  runAllBtn.className = 'action-run-btn action-group-run';
-  runAllBtn.disabled = anyBusy || ids.length === 0;
-  runAllBtn.title = anyBusy ? 'Group running…' : `Run all ${ids.length} actions in this group`;
-  runAllBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Run all</span>';
-  runAllBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    vscode.postMessage({ type: 'runActionGroup', ids });
-  });
-
   header.appendChild(caret);
   header.appendChild(swatch);
   header.appendChild(title);
   header.appendChild(count);
-  header.appendChild(runAllBtn);
+  header.appendChild(createRunAllButton(ids));
   header.addEventListener('click', () => {
-    if (collapsedActionGroups.has(node.path)) collapsedActionGroups.delete(node.path);
-    else collapsedActionGroups.add(node.path);
+    expandedActionGroups.delete(node.path);
     renderCurrentView();
   });
   card.appendChild(header);
 
-  if (!collapsed) {
-    const body = document.createElement('div');
-    body.className = 'action-group-body';
-    // Nested groups first, then this group's own member actions.
-    for (const child of node.children.values()) {
-      body.appendChild(createActionGroup(child, color));
-    }
-    if (node.actions.length > 0) {
-      const grid = document.createElement('div');
-      grid.className = 'action-grid';
-      for (const action of node.actions) grid.appendChild(createActionCard(action));
-      body.appendChild(grid);
-    }
-    card.appendChild(body);
-  }
+  const body = document.createElement('div');
+  body.className = 'action-group-body';
+  body.appendChild(renderActionLevel(node, color));
+  card.appendChild(body);
 
   return card;
 }
